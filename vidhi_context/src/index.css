@@ -1,0 +1,506 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@300;400;500;700&display=swap');
+
+:root {
+  /* Premium Trading Palette (Strike/ZEX Inspired) */
+  --bg-core: #000000;
+  --panel-bg: #0A0D14;
+  /* Deep, rich blue-black */
+  --panel-bg-hover: #0F131C;
+  --border-glass: rgba(255, 255, 255, 0.06);
+  --border-light: rgba(255, 255, 255, 0.15);
+
+  --brand-gradient: linear-gradient(135deg, #00D4FF, #0072FF);
+  --brand-cyan: #00D4FF;
+  --brand-blue: #0072FF;
+
+  --text-bright: #FFFFFF;
+  --text-muted: rgba(255, 255, 255, 0.7);
+  --text-dim: rgba(255, 255, 255, 0.4);
+
+  --neon-green: #00FF66;
+  --neon-red: #FF2A4B;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-core);
+  color: var(--text-bright);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* SpaceX Brutalist Panel */
+.glass-panel {
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-glass);
+  border-radius: 4px;
+  /* Slight rounding for Figma polish */
+  padding: 1.5rem;
+  transition: all 0.2s ease-out;
+  backdrop-filter: blur(12px);
+}
+
+.glass-panel:hover {
+  border-color: var(--border-light);
+  box-shadow: 0 4px 20px rgba(0, 198, 255, 0.05);
+}
+
+/* Typography */
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.panel-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.font-mono {
+  font-family: 'Roboto Mono', monospace;
+}
+
+/* Premium Card Component */
+.premium-card {
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  /* Strike-inspired softness */
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.4s ease;
+}
+
+.premium-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-light);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Primary Button - Apple Spring Feel */
+.btn-primary {
+  background: var(--brand-gradient);
+  background-size: 200% auto;
+  border: none;
+  border-radius: 8px;
+  /* Softer pill-like */
+  color: #fff;
+  padding: 10px 24px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Apple Fluid Spring Transition */
+  transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease, background-position 0.4s ease;
+  box-shadow: 0 4px 15px rgba(0, 212, 255, 0.15);
+  letter-spacing: 0.5px;
+}
+
+.btn-primary:hover {
+  background-position: right center;
+  transform: scale(1.04);
+  box-shadow: 0 8px 25px rgba(0, 212, 255, 0.4);
+}
+
+.btn-primary:active {
+  transform: scale(0.96);
+  box-shadow: 0 2px 10px rgba(0, 212, 255, 0.2);
+}
+
+/* Danger / Stop Button */
+.btn-danger {
+  background-color: transparent;
+  border: 1px solid #e11d48;
+  border-radius: 0;
+  color: #e11d48;
+  padding: 8px 24px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.btn-danger:hover {
+  background-color: #e11d48;
+  color: #fff;
+}
+
+/* Tables */
+table th {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 0.7rem;
+  font-family: 'Roboto Mono', monospace;
+  font-weight: 400;
+  padding-bottom: 1rem;
+  color: var(--text-muted);
+}
+
+table tr {
+  transition: background-color 0.15s;
+}
+
+table tr:hover {
+  background-color: var(--panel-bg-hover) !important;
+}
+
+/* Animations */
+@keyframes blink-cursor {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes tv-flash {
+  0% {
+    color: var(--text-bright);
+    text-shadow: 0 0 10px #fff;
+    transform: scale(1.05);
+  }
+
+  100% {
+    color: inherit;
+    text-shadow: none;
+    transform: scale(1);
+  }
+}
+
+@keyframes tv-flash-blue {
+  0% {
+    color: var(--brand-cyan);
+    text-shadow: 0 0 15px var(--brand-cyan);
+    transform: scale(1.05);
+  }
+
+  100% {
+    color: inherit;
+    text-shadow: none;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in-tv {
+  0% {
+    transform: translateY(15px) scale(0.98);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.tv-value {
+  transition: all 0.1s ease-out;
+  display: inline-block;
+}
+
+.tv-flash-active {
+  animation: tv-flash 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.tv-flash-blue-active {
+  animation: tv-flash-blue 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.tv-slide-in {
+  /* Apple spring entrance */
+  animation: slide-in-tv 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) backwards;
+}
+
+.pulsing-dot {
+  width: 10px;
+  height: 14px;
+  background-color: var(--text-bright);
+  animation: blink-cursor 1s step-end infinite;
+}
+
+/* ZEX Order Book Styling */
+.lob-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  height: 18px;
+  cursor: default;
+  transition: background-color 0.2s ease;
+}
+
+.lob-row:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.lob-bg {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  opacity: 0.15;
+  transition: width 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.lob-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 1.5rem;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.dashboard-title {
+  font-size: 1rem;
+  font-weight: 400;
+  font-family: 'Roboto Mono', monospace;
+  color: var(--text-bright);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Structural Layout (Production Grade) */
+.command-center-layout {
+  display: grid;
+  grid-template-areas:
+    "navbar navbar navbar"
+    "dock center telemetry";
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 64px 1fr 300px;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-core);
+  overflow: hidden;
+}
+
+/* Top Navigation Bar */
+.top-navbar {
+  grid-area: navbar;
+  background-color: var(--panel-bg);
+  border-bottom: 1px solid var(--border-glass);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.5rem;
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.brand-logo {
+  height: 28px;
+  object-fit: contain;
+}
+
+.navbar-user-section {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+/* Left Dock */
+.layout-dock {
+  grid-area: dock;
+  background-color: var(--panel-bg);
+  border-right: 1px solid var(--border-glass);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  gap: 16px;
+}
+
+.dock-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-left: 2px solid transparent;
+}
+
+.dock-icon:hover {
+  color: var(--text-bright);
+}
+
+.dock-icon.active {
+  color: var(--text-bright);
+  background-color: rgba(255, 255, 255, 0.05);
+  border-left: 2px solid var(--text-bright);
+}
+
+/* Center Content */
+.layout-center {
+  grid-area: center;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Right Telemetry Sidebar */
+.layout-telemetry {
+  grid-area: telemetry;
+  background-color: var(--panel-bg);
+  border-left: 1px solid var(--border-glass);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+/* Telemetry Widgets */
+.telemetry-block {
+  margin-bottom: 1.5rem;
+}
+
+.telemetry-header {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
+.telemetry-value {
+  font-size: 1.2rem;
+  color: var(--text-bright);
+  font-family: 'Roboto Mono', monospace;
+  font-weight: 500;
+}
+
+.telemetry-bar {
+  height: 2px;
+  background-color: var(--border-light);
+  margin-top: 8px;
+  width: 100%;
+}
+
+.telemetry-fill {
+  height: 100%;
+  background-color: var(--text-bright);
+}
+
+/* Sparkline SVGs */
+.sparkline {
+  stroke: var(--text-bright);
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.badge {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-bright);
+}
+
+.chart-container {
+  flex: 1;
+  min-height: 200px;
+  position: relative;
+}
+
+/* Tiny dot indicators */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  box-shadow: 0 0 5px var(--neon-cyan);
+}
+
+.status-dot.pulsing {
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.4;
+    box-shadow: 0 0 2px var(--neon-cyan);
+  }
+
+  to {
+    opacity: 1;
+    box-shadow: 0 0 8px var(--neon-cyan);
+  }
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-core);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-glass);
+  border-radius: 3px;
+}
+
+.tv-spin { animation: spin 1s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }

@@ -1,0 +1,593 @@
+# Project Vidhi: Arena v5.0 — DYNAMIC BOT COMPETITION
+## Industry-Class Algorithmic Trading Contest Platform
+
+---
+
+## ARCHITECTURE CORRECTION (v5.1)
+
+### Two User Roles
+
+| Role | Access |
+|---|---|
+| **Contest Creator** | Create contests, configure rounds, set bot configs per round, view all student scores, publish results |
+| **Contestant (Student)** | Browse contests, join, code, test locally, submit final code |
+
+### Bots: Private Market Simulator — NOT Leaderboard Participants
+
+Bots exist ONLY inside each student's **private isolated simulation session**.
+They create a realistic dynamic market so the student's code is not just
+paper-traded against a static replay — but they are INVISIBLE to other students
+and do NOT appear on the leaderboard.
+
+```
+Student A's Session:          Student B's Session:
+┌──────────────────────┐      ┌──────────────────────┐
+│  Student A's LOB     │      │  Student B's LOB     │
+│  + Bot Fleet (priv.) │      │  + Bot Fleet (priv.) │
+│  → A's PnL score     │      │  → B's PnL score     │
+└──────────────────────┘      └──────────────────────┘
+        ↓                               ↓
+   ┌────────────────────────────────────────┐
+   │  LEADERBOARD: A's PnL% vs B's PnL%    │
+   │  (students only, bots never appear)    │
+   └────────────────────────────────────────┘
+```
+
+### Contest Structure (IMC Prosperity style)
+
+```
+Contest
+├── Round 1  (Day 1 — e.g. "Seashells Market")
+│   ├── Asset: VIDHI-1
+│   ├── Active bots: Market Maker + Noise Trader
+│   ├── Bot aggressiveness: LOW
+│   ├── Tick count: 100,000
+│   └── Start/end time
+├── Round 2  (Day 2 — e.g. "Vouchers & Starfruit")
+│   ├── Asset: VIDHI-2
+│   ├── Active bots: ALL 5
+│   ├── Bot aggressiveness: HIGH
+│   ├── Tick count: 200,000
+│   └── Start/end time
+└── Round N...
+```
+
+---
+
+> **Target:** A real contest platform where contestants' algorithms compete
+> against dynamic bots that actively react to every trade made.
+> **Revision:** v5.0 — Full dynamic bot architecture. LOB is live, persistent,
+> and shared. Bots are real market participants, not replay.
+
+---
+
+## 0. What This Platform Is
+
+An algorithmic trading contest. Contestants submit a Python trading algorithm.
+The platform runs that algorithm against a live Limit Order Book (LOB) populated
+by 5 intelligent bot strategies that react dynamically to the contestant's trades.
+
+**The point:** A bot that doesn't react is just expensive data replay. Our bots
+see the contestant's orders in the LOB and respond like real market participants.
+A good contestant algorithm must handle spread widening, momentum piling, and
+mean reversion resistance — because the bots enforce all three.
+
+```
+ Contestant Algorithm (Python → compiled .so)
+         │
+         │ sees live LOB ← bots have already responded to your last move
+         ▼
+ ┌──────────────────────────────────────────────────┐
+ │            LIVE PERSISTENT LOB                    │
+ │  (accumulates across all 1,000,000 ticks)         │
+ │                                                   │
+ │  ← Bot 1: Market Maker  (posts quotes, reacts)   │
+ │  ← Bot 2: Momentum      (follows your moves)     │
+ │  ← Bot 3: Mean Reversion (fades your moves)      │
+ │  ← Bot 4: Noise Trader  (random realistic flow)  │
+ │  ← Bot 5: Sniper/Arb   (anchors price to signal) │
+ └──────────────────────────────────────────────────┘
+         │
+         ▼
+ Fills distributed → Contestant PnL updated → Leaderboard
+```
+
+**Scoring:** Primary = PnL at end of simulation. Secondary = avg latency/tick.
+Equal PnL → lower latency wins. Negative PnL → ranked below all positive.
+
+---
+
+## 1. The Tick Loop — Core Architecture (Revised)
+
+Every tick, this exact sequence executes on Core 2:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  GAME MASTER — PER TICK SEQUENCE                 │
+│                                                                   │
+│  Step 1: Read price signal for tick T                            │
+│    signal = tick_dataset[T]  // {mid_price, volatility, news}   │
+│    ~4ns — L1 cache hit, hugepage                                 │
+│                                                                   │
+│  Step 2: Snapshot current LOB state                              │
+│    snap = lob.snapshot()                                         │
+│    // {best_bid, best_ask, depth[10], last_trade, spread}        │
+│    ~8ns — L1 cache (LOB hot path fits in 24KB)                   │
+│                                                                   │
+│  Step 3: Compute ALL bot orders INLINE (C++, same core)          │
+│    for bot in [mm, momentum, mean_rev, noise, sniper]:           │
+│        bot.compute(snap, signal)  → pending_orders[]            │
+│    ~10ns total for all 5 bots (compiled C++, branchless)         │
+│                                                                   │
+│  Step 4: Write LOB state + prev fills → rendezvous               │
+│    Regular stores (NOT NT) into shared struct                    │
+│    ~15ns                                                          │
+│                                                                   │
+│  Step 5: Signal contestant (release store on gm_sequence)        │
+│    ~4ns                                                           │
+│                                                                   │
+│  Step 6: Spin-wait for contestant response (100µs deadline)      │
+│    _mm_pause loop on sb_sequence                                 │
+│    Watchdog thread monitors — SIGKILL child on TLE               │
+│    Contestant computation time NOT counted in platform overhead  │
+│                                                                   │
+│  Step 7: Read contestant orders from rendezvous                  │
+│    ~4ns — L1 cache hit                                            │
+│                                                                   │
+│  Step 8: Process ALL orders into LOB                             │
+│    a) Bot orders (arrive first — same core, ~0ns transport)      │
+│    b) Contestant order (arrives after response signal)           │
+│    LOB.process_all(pending_orders) → fills[]                    │
+│    FIFO matching within same price level                         │
+│    ~10ns (branchless, best-ptr fast path)                        │
+│                                                                   │
+│  Step 9: Distribute fills                                        │
+│    contestant_fills = fills.for(CONTESTANT_ID)                   │
+│    for bot: bot.notify_fill(fills.for(bot.id))                   │
+│    ~5ns                                                           │
+│                                                                   │
+│  Step 10: PnL update (fixed-point, __int128 for safety)          │
+│    pnl += contestant_fills.value(snap.mid_price)                 │
+│    ~3ns                                                           │
+│                                                                   │
+│  Step 11: Telemetry                                              │
+│    __rdtscp → tsc_delta                                          │
+│    _mm_stream_si64() × fields → telemetry ring                   │
+│    _mm_sfence()                                                   │
+│    ~26ns                                                          │
+│                                                                   │
+│  TOTAL PLATFORM OVERHEAD (excl. contestant compute): ~89ns/tick  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. NUMA Layout (Revised for Dynamic Bots)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        NUMA NODE 0 (Socket 0)                        │
+│                                                                       │
+│  CORE 2: Game Master + All 5 Bots (inline)                           │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │ Bots run inline — compiled C++, no IPC needed               │     │
+│  │ Bot computation total: ~10ns for all 5                      │     │
+│  │                                                             │     │
+│  │ Persistent LOB (24KB → L1 resident always)                  │     │
+│  │ Price signal dataset (1GB hugepage mmap)                    │     │
+│  │ PnL tracker (fixed-point int64)                             │     │
+│  │ Open orders tracker per participant                         │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+│             │                                                         │
+│             │  regular stores (MESI coherence)                       │
+│             ▼                                                         │
+│       [SharedMem rendezvous — 1024 bytes, 2MB hugepage]              │
+│             │                                                         │
+│             │  acquire on gm_sequence                                │
+│             ▼                                                         │
+│  CORE 3: Contestant Sandbox (child process)                          │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │ dlopen(contestant.so) → on_tick raw C ptr call              │     │
+│  │ Receives: LOB depth + fill history + position               │     │
+│  │ Writes:   orders to order_out[]                             │     │
+│  │ Seccomp BPF + namespace + cgroups v2 (5-layer security)     │     │
+│  │ SIGKILL watchdog: 100µs deadline enforced by GM thread      │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+│             │                                                         │
+│             │  _mm_stream_si64() + _mm_sfence() (telemetry ONLY)     │
+│             ▼                                                         │
+│       [Metrics Ring — 65536 entries × 64 bytes = 4MB]                │
+│             │                                                         │
+│  CORE 4: Telemetry Watchdog                                          │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │ Drain ring (same NUMA node — no QPI)                        │     │
+│  │ HDR Histogram double-buffer (no data race)                  │     │
+│  │ tsc_delta → ns via calibrated ns_per_tsc_tick               │     │
+│  │ Shadow LOB Validator (FIFO + correctness audit)             │     │
+│  │ Batch flush → TimescaleDB (binary COPY, 10k batches)        │     │
+│  │ Atomic mmap export: p50_ns, p90_ns, p99_ns                  │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────────────┘
+
+GRUB:
+isolcpus=managed_irq,domain,2-4
+nohz_full=2-4
+rcu_nocbs=2-4
+processor.max_cstate=0
+intel_idle.max_cstate=0
+skew_tick=1
+rcupdate.rcu_normal=1
+```
+
+---
+
+## 3. The Shared Rendezvous Struct (Extended for Dynamic Bots)
+
+The rendezvous now carries LOB depth + fills in both directions:
+
+```cpp
+// rendezvous.hpp — v5.0 layout
+// All fields on dedicated 64-byte cache lines (no false sharing)
+
+struct alignas(64) SharedMem {
+
+    // ─── Cache Line 0: GM signal ───────────────────────────────────────
+    std::atomic<uint64_t> gm_sequence{0};
+    uint8_t _pad0[56];
+
+    // ─── Cache Lines 1-4: Market State (GM writes, Contestant reads) ───
+    struct MarketState {
+        double  bid_price;            // best bid
+        double  ask_price;            // best ask
+        double  mid_price;
+        double  spread;               // widens when market maker scared
+        double  last_trade_price;
+        int64_t last_trade_volume;
+        int64_t bid_depth[5];         // [best, -1, -2, -3, -4 ticks]
+        int64_t ask_depth[5];         // [best, +1, +2, +3, +4 ticks]
+        uint64_t timestamp;
+        double  underlying_signal;    // reference fair value
+        uint8_t _pad[16];
+    } market;  // 128 bytes = 2 cache lines
+
+    // ─── Cache Line 6-7: Fill Notifications + Contestant Status ────────
+    struct FillNotification {
+        int64_t  order_id;
+        double   fill_price;
+        int64_t  fill_volume;
+        uint8_t  side;          // 0=buy_filled, 1=sell_filled
+        uint8_t  pad[7];
+    };
+    FillNotification fills[4];    // up to 4 fills per tick
+    int32_t  fill_count;
+    int64_t  position;            // contestant's net position
+    double   cash;                // contestant's cash
+    double   pnl;                 // mark-to-market PnL
+    int32_t  open_order_count;
+    uint8_t  _pad1[8];            // 128 bytes = 2 cache lines
+
+    // ─── Cache Line 8: Sandbox signal ──────────────────────────────────
+    std::atomic<uint64_t> sb_sequence{0};
+    uint8_t _pad2[56];
+
+    // ─── Cache Lines 9-12: Order Zone (Contestant writes) ──────────────
+    struct Order {
+        uint8_t  type;    // 0=HOLD, 1=LIMIT_BUY, 2=LIMIT_SELL,
+                          // 3=MARKET_BUY, 4=MARKET_SELL, 5=CANCEL
+        uint8_t  pad[7];
+        double   price;   // for limit orders
+        int64_t  volume;
+        int64_t  order_id; // for cancels
+    };
+    Order   orders[4];    // up to 4 orders per tick
+    int32_t order_count;
+    uint8_t _pad3[28];   // 192 bytes = 3 cache lines
+
+    // ─── Cache Lines 15-16: Persistent State Zone ──────────────────────
+    int64_t contestant_state[16];  // contestant persists own state here
+};                                  // 0ns serialization, GM passes back unchanged
+// Total: 1024 bytes, zero false sharing
+```
+
+---
+
+## 4. The Bot Strategy Library (Inline C++ on Core 2)
+
+All 5 bots compiled C++, inline in Game Master. No IPC. No fork. ~10ns total.
+
+```cpp
+// bot_fleet.hpp
+
+// Bot 1: Market Maker
+// Posts bid/ask around best. Widens spread when inventory builds.
+// Contestant who takes liquidity pays spread every time.
+struct MarketMaker {
+    int64_t inventory = 0;
+    double  quote_offset = 0.01;
+
+    void compute(const LOBSnapshot& snap, const PriceSignal& sig,
+                 OrderBuffer& out) {
+        double skew = inventory * 0.001;  // Avellaneda-Stoikov skew
+        cancel_stale_quotes(out);
+        out.limit_buy(snap.mid - quote_offset - skew, 50);
+        out.limit_sell(snap.mid + quote_offset - skew, 50);
+    }
+    void on_fill(Fill f) { inventory += (f.side == BUY ? 1 : -1) * f.volume; }
+};
+
+// Bot 2: Momentum Trader
+// If price rises above EMA → buys. Contestant causing spike gets front-run.
+struct MomentumTrader {
+    double ema = 0.0;
+    void compute(const LOBSnapshot& snap, const PriceSignal& sig,
+                 OrderBuffer& out) {
+        ema = 0.95 * ema + 0.05 * snap.mid;
+        double signal = snap.mid - ema;
+        if (signal > 2 * sig.tick_size)  out.market_buy(30);
+        if (signal < -2 * sig.tick_size) out.market_sell(30);
+    }
+};
+
+// Bot 3: Mean Reversion
+// Fades moves that diverge from underlying signal.
+// Contestant can't spam aggressive orders — this bot sells into it.
+struct MeanReversionBot {
+    void compute(const LOBSnapshot& snap, const PriceSignal& sig,
+                 OrderBuffer& out) {
+        double dev = snap.mid - sig.fair_value;
+        if (dev >  5 * sig.tick_size) out.limit_sell(snap.mid - sig.tick_size, 100);
+        if (dev < -5 * sig.tick_size) out.limit_buy(snap.mid  + sig.tick_size, 100);
+    }
+};
+
+// Bot 4: Noise Trader
+// Random realistic order flow. Makes LOB feel alive.
+struct NoiseTrader {
+    uint64_t rng = 0xDEADBEEFCAFEBABE;
+    void compute(const LOBSnapshot& snap, const PriceSignal& sig,
+                 OrderBuffer& out) {
+        uint64_t r = xorshift64(rng);
+        if (r % 3 != 0) return;
+        double offset = (int(r % 5) - 2) * sig.tick_size;
+        (r % 2) ? out.limit_buy(snap.bid + offset, 10 + r % 40)
+                : out.limit_sell(snap.ask + offset, 10 + r % 40);
+    }
+};
+
+// Bot 5: Sniper / Arbitrageur
+// Keeps LOB anchored to fair value. No free money from stale quotes.
+struct SniperBot {
+    void compute(const LOBSnapshot& snap, const PriceSignal& sig,
+                 OrderBuffer& out) {
+        if (snap.best_ask < sig.fair_value - sig.tick_size)
+            out.market_buy(snap.best_ask_volume);
+        if (snap.best_bid > sig.fair_value + sig.tick_size)
+            out.market_sell(snap.best_bid_volume);
+    }
+};
+```
+
+---
+
+## 5. The Persistent LOB
+
+```cpp
+// persistent_lob.hpp
+struct alignas(64) PersistentLOB {
+
+    // HOT: single cache line (99% of matches happen here)
+    double   best_bid_price;
+    int64_t  best_bid_volume;
+    uint64_t best_bid_order_id;
+    double   best_ask_price;
+    int64_t  best_ask_volume;
+    uint64_t best_ask_order_id;
+    double   last_trade_price;
+    uint8_t  _pad[8];  // 64 bytes
+
+    // FULL DEPTH: resting orders (24KB → L1 resident)
+    alignas(64) int64_t  bid_volumes[MAX_LEVELS];
+    alignas(64) int64_t  ask_volumes[MAX_LEVELS];
+    alignas(64) uint64_t bid_fifo_heads[MAX_LEVELS]; // FIFO order tracking
+
+    // ORDER REGISTRY: maps order_id → {price, volume, side, participant}
+    std::unordered_map<uint64_t, OrderRecord> order_registry;
+
+    // Match ALL orders (bots arrive before contestant — same core lead)
+    std::vector<Fill> process_all(std::vector<Order>& orders) {
+        // Stable sort by arrival_tsc — bots always arrive first
+        std::stable_sort(orders.begin(), orders.end(),
+            [](auto& a, auto& b){ return a.arrival_tsc < b.arrival_tsc; });
+
+        std::vector<Fill> fills;
+        for (auto& o : orders) {
+            auto f = match(o);
+            fills.insert(fills.end(), f.begin(), f.end());
+        }
+        update_best_ptrs();
+        return fills;
+    }
+};
+```
+
+---
+
+## 6. Contestant's `on_tick()` Experience (Clean OOP)
+
+```python
+def on_tick(state, orders):
+    # ── Live Market State (bots have already responded to your last trade) ──
+    state.bid_price           # best bid right now
+    state.ask_price           # best ask
+    state.spread              # widens after you take too much liquidity
+    state.bid_depth           # [vol@best, vol@best-1, ..., @best-4]
+    state.ask_depth           # same on ask side
+    state.last_trade_price
+    state.underlying_signal   # reference fair value (from platform)
+
+    # ── Your State ──────────────────────────────────────────────────────
+    state.position            # net position
+    state.cash
+    state.pnl                 # mark-to-market
+    state.open_orders         # your resting limit orders in LOB
+
+    # ── Fill Notifications (from PREVIOUS tick's orders) ────────────────
+    for fill in state.fills:
+        fill.price; fill.volume; fill.side  # 'buy' or 'sell'
+
+    # ── Your Persistent State (0ns IPC, lives across ticks) ─────────────
+    state.ema_fast; state.tick_count  # ... + 14 more int64 slots
+
+    # ── Order Submission (max 4 per tick) ────────────────────────────────
+    orders.limit_buy(price=1500.20, volume=10)
+    orders.limit_sell(price=1500.40, volume=5)
+    orders.market_buy(volume=20)
+    orders.market_sell(volume=20)
+    orders.cancel(order_id=state.open_orders[0].id)
+```
+
+---
+
+## 7. Underlying Price Signal Dataset
+
+```
+tick_dataset (Arrow IPC, 1GB hugepage):
+  tick_id          uint64    tick number (0 to 999,999)
+  fair_value       float64   reference price (e.g. $1500.25)
+  volatility       float64   realized vol — drives MM quote width
+  tick_size        float64   minimum increment
+  news_flag        uint8     0=normal, 1=event (bots trade aggressively)
+
+Pre-recorded per round. Same price journey for all contestants.
+Bot REACTIONS differ per contestant (because their LOBs evolve differently).
+This is FAIR: a better algo should produce better outcomes vs the SAME bots.
+```
+
+---
+
+## 8. Scoring System
+
+```
+Primary Score:    Final PnL% = (cash + position×last_price - capital) / capital × 100
+Tiebreaker:       Avg ns/tick (lower = better, only when PnL diff < 0.001%)
+
+Penalties:
+  Position limit breach    → -10% PnL per violation
+  TLE tick (>100µs)        → order treated as HOLD, tick still counted
+  Negative final PnL       → ranked below all positive PnL contestants
+
+Leaderboard update:  every 1000 ticks (HDR histogram, <1ms latency)
+Final score locked:  at tick 1,000,000
+```
+
+---
+
+## 9. Multi-Contestant Concurrency (20 Simultaneous)
+
+Each contestant gets isolated simulation: own LOB, own bots, own core pair.
+
+```
+Core Topology (64-core EPYC):
+  Cores 0-1:    OS
+  Cores 2-3:    GM1+Bots1 / Sandbox1  → slot 1
+  Cores 4-5:    GM2+Bots2 / Sandbox2  → slot 2
+  ...
+  Cores 40-41:  GM20+Bots20 / Sandbox20 → slot 20
+  Core 42-43:   Telemetry Watchdog A/B
+  Cores 44+:    Control plane (Go, Redis, TimescaleDB)
+
+Throughput: 20 × 1M ticks × ~300ns/tick = 300ms per wave
+100 contestants → 5 waves → ~1.6 seconds total
+```
+
+---
+
+## 10. Performance Budget (v5.0)
+
+```
+Platform overhead per tick (excl. contestant compute): ~111 ns
+  vs v4.0 ~76ns — extra 35ns from persistent LOB + bot inline compute + fills
+
+1M ticks overhead:   ~111ms
+Simple EMA algo:     ~311ms total (200ns contestant + 111ns platform)
+Complex ML algo:     ~2.1 seconds total
+
+Physics floor:       Cannot go below ~89ns without removing bots or fills.
+```
+
+---
+
+## 11. Build Status
+
+| Component | Status | Priority |
+|-----------|--------|----------|
+| C++ Game Master (dynamic tick loop) | 🔴 Not started | P0 |
+| Persistent LOB (order registry) | 🔴 Not started | P0 |
+| Bot Fleet — 5 strategies (inline C++) | 🔴 Not started | P0 |
+| Extended Rendezvous (1024 bytes, fills) | 🔴 Not started | P0 |
+| TSC Calibration (CPUID check) | 🔴 Not started | P0 |
+| SIGKILL Watchdog Thread | 🔴 Not started | P0 |
+| Go Orchestrator | 🟡 Spec'd | P0 |
+| AST Scanner + Transpiler | 🔴 Not started | P0 |
+| Numba Forge (CPointer) | 🔴 Not started | P0 |
+| ELF Validator | 🔴 Not started | P1 |
+| Sandbox Manager (isolated Docker) | 🔴 Not started | P0 |
+| Warm Sandbox Pool (20 pre-forked) | 🔴 Not started | P1 |
+| HDR Histogram (double-buffer) | 🔴 Not started | P1 |
+| Shadow LOB Validator | 🔴 Not started | P1 |
+| 5-Layer Security | 🔴 Not started | P1 |
+| Scoring Engine (PnL + latency) | 🔴 Not started | P1 |
+| TimescaleDB Schema (fills + PnL) | 🔴 Not verified | P1 |
+| Frontend Dashboard | 🟢 Largely built | P1 |
+| Docker Compose | 🟡 Needs updates | P1 |
+
+---
+
+## 12. File Map (v5.0)
+
+```
+IICPC_ALGO_TRADING_PLATFORM/
+│
+├── game-master/                     C++ — Data Plane
+│   ├── main.cpp                     Dynamic tick loop
+│   ├── rendezvous.hpp               1024-byte struct (depth + fills)
+│   ├── persistent_lob.hpp           Live LOB + FIFO + order registry
+│   ├── bot_fleet.hpp                5 inline bot strategies
+│   ├── price_signal.hpp             Arrow mmap + hugepage loader
+│   ├── watchdog.hpp                 SIGKILL child watchdog thread
+│   ├── pnl_tracker.hpp              Fixed-point + __int128 safety
+│   ├── position_limits.hpp          Branchless hard limit enforcer
+│   ├── telemetry.hpp                __rdtscp + NT store + sfence
+│   ├── tsc_calibrate.hpp            CPUID invariant check + calibrate
+│   ├── hdr_histogram/ (vendored)
+│   └── CMakeLists.txt               -O3 -march=native -flto
+│
+├── sandbox/
+│   ├── sandbox_runner.cpp           dlopen .so, CPointer on_tick call
+│   ├── seccomp_filter.hpp           BPF syscall allowlist
+│   └── Dockerfile
+│
+├── backend/                         Go
+│   ├── forge/
+│   │   ├── scanner.py               AST security scanner
+│   │   ├── transpiler.py            ast.NodeTransformer shim
+│   │   └── forge.py                 Numba CPointer cfunc compiler
+│   ├── validator/elf_validator.go
+│   ├── credits/ledger.go
+│   ├── jobs/queue.go
+│   ├── api/submit.go + scores.go + runs.go
+│   └── db/schema.sql                (fills, pnl, latency hypertables)
+│
+├── sandbox-manager/                 Go — Privileged (Docker socket only)
+│
+├── bot-fleet/
+│   └── NOTE.md                      Deprecated. Bots now inline in GM.
+│
+└── vidhi_context/                   React/Vite
+    └── src/pages/
+        ├── CodeArena.jsx            Editor + credit counter
+        ├── SimulationDashboard.jsx  Live PnL curve + bot activity
+        ├── Leaderboard.jsx          PnL% + latency ranking
+        ├── Submissions.jsx          Run history + fill log
+        └── AssetWiki.jsx            Bot descriptions + round rules
+```

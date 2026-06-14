@@ -1,0 +1,55 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Build and push backend image
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_URL }}
+          docker build -t vidhi-backend backend/
+          docker tag vidhi-backend ${{ secrets.ECR_URL }}/vidhi-backend:latest
+          docker push ${{ secrets.ECR_URL }}/vidhi-backend:latest
+
+      - name: Update ECS Fargate Service
+        run: |
+          aws ecs update-service \
+            --cluster vidhi-cluster \
+            --service vidhi-backend \
+            --force-new-deployment
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Build React App
+        run: |
+          cd vidhi_context
+          npm ci
+          # Inject the ALB URL so the frontend knows where the API is
+          VITE_API_URL=http://${{ secrets.ALB_URL }} npm run build
+          
+      - name: Sync to S3
+        run: |
+          aws s3 sync vidhi_context/dist/ s3://${{ secrets.FRONTEND_BUCKET }} --delete

@@ -1,0 +1,33 @@
+# Go
+gopath/
+vendor/
+
+# Node
+node_modules/
+dist/
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large Datasets
+*.csv
+*.bin
+*.arrow
+
+# Binaries / Zips
+*.zip
+vidhi-backend
+sandbox-manager_linux
+*.exe
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl

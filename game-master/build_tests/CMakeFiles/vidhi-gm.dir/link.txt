@@ -1,0 +1,1 @@
+/usr/local/bin/c++ -O3 -march=x86-64 -flto -funroll-loops -fno-omit-frame-pointer "CMakeFiles/vidhi-gm.dir/main.cpp.o" -o vidhi-gm  -ldl -lpthread -lm 

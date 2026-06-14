@@ -1,0 +1,10 @@
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/vidhi-gm.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/pgo-train.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/vidhi-tests.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/test.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/edit_cache.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/rebuild_cache.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/list_install_components.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/install.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/install/local.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/install/strip.dir

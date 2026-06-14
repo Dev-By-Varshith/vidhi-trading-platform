@@ -1,0 +1,36 @@
+- name: Vidhi Arena AWS Bare Metal Lockdown
+  hosts: all
+  become: yes
+  tasks:
+    - name: Configure GRUB for Extreme CPU Isolation
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        # Core 0,1 for OS. Cores 2-4 fully isolated for Game Master and Sandbox.
+        # 1GB hugepages allocated to eliminate TLB misses for the Arrow tick dataset.
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="console=tty1 console=ttyS0 nvme_core.io_timeout=4294967295 isolcpus=managed_irq,domain,2-4 nohz_full=2-4 rcu_nocbs=2-4 processor.max_cstate=0 intel_idle.max_cstate=0 idle=poll skew_tick=1 rcupdate.rcu_normal=1 default_hugepagesz=1G hugepagesz=1G hugepages=4"'
+      notify: update-grub
+
+    - name: Create systemd service for DMA Latency Clamping (UMWAIT)
+      copy:
+        dest: /etc/systemd/system/c-state-clamp.service
+        content: |
+          [Unit]
+          Description=Clamp CPU DMA Latency to 0 (Prevent ACPI C-States)
+          [Service]
+          Type=simple
+          ExecStartPre=/bin/chmod 666 /dev/cpu_dma_latency
+          ExecStart=/bin/sh -c 'exec 3<> /dev/cpu_dma_latency; echo -ne "\\0\\0\\0\\0" >&3; sleep infinity'
+          Restart=always
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable DMA Latency Clamping
+      systemd:
+        name: c-state-clamp.service
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: update-grub
+      command: update-grub

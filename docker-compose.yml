@@ -1,0 +1,173 @@
+version: "3.9"
+
+networks:
+  control_plane:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+    # shared between backend and game-master
+
+services:
+  # ──────────────────────────────────────────────
+  # Databases
+  # ──────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: vidhi_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vidhi
+      POSTGRES_PASSWORD: vidhi_secret
+      POSTGRES_DB: vidhidb
+    ports:
+      - "5432:5432"
+    cpuset: "0-1"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - control_plane
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U vidhi -d vidhidb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: vidhi_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    cpuset: "0-1"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - control_plane
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: vidhi_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    cpuset: "0-1"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=vidhi_admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - control_plane
+    depends_on:
+      - postgres
+
+  # ──────────────────────────────────────────────
+  # Sandbox Manager (Privileged Docker Spawner)
+  # ──────────────────────────────────────────────
+  sandbox_manager:
+    build:
+      context: ./sandbox-manager
+      dockerfile: Dockerfile
+    container_name: vidhi_sandbox_manager
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - uploads_data:/uploads
+      - /tmp/vidhi_pool:/tmp/vidhi_pool
+      # Seccomp profile — mounted at the path referenced by spawner.go SeccompProfilePath const.
+      # This makes the custom BPF filter available when spawner creates contestant containers.
+      - ./sandbox-manager/seccomp.json:/etc/vidhi/seccomp.json:ro
+    networks:
+      - control_plane
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8081/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────
+  # Contestant Sandbox (Image Builder ONLY)
+  # ──────────────────────────────────────────────
+  sandbox_image_builder:
+    build:
+      context: .
+      dockerfile: sandbox/Dockerfile
+    image: vidhi_sandbox:latest
+    container_name: vidhi_sandbox_builder_dummy
+    # This service is just to ensure docker-compose builds the image
+    # so sandbox_manager can spawn it dynamically. We don't want it to run.
+    command: [ "echo", "sandbox image built" ]
+    restart: "no"
+    networks:
+      - control_plane
+
+  # ──────────────────────────────────────────────
+  # Go Orchestrator (Control Plane)
+  # ──────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: vidhi_backend
+    restart: unless-stopped
+    ipc: host
+    cpuset: "0-1" # OS cores (same as postgres/redis) — NOT the GM data-plane cores (2-4)!
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: "postgres://vidhi:vidhi_secret@vidhi_postgres:5432/vidhidb?sslmode=disable"
+      REDIS_URL: "vidhi_redis:6379"
+      DOCKER_HOST: "tcp://vidhi_sandbox_manager:8081"
+      DISCORD_WEBHOOK_URL: "" # Add your discord webhook URL here to announce high scores
+      FORGE_DIR: "/app/forge"
+      GM_BIN: "/app/vidhi-gm"
+      PORT: "8080"
+      CREDITS_PER_DAY: "500"
+      # SO_CACHE MUST be on the shared uploads_data volume so sandbox_manager can read it.
+      # The sandbox manager runs in a separate container with no access to /tmp/vidhi/so.
+      SO_CACHE: "/uploads/so"
+    volumes:
+      - uploads_data:/uploads
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - control_plane
+    healthcheck:
+      test: [ "CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')\"" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────
+  # Frontend Dashboard (Vite → nginx)
+  # ──────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./vidhi_context
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "http://localhost:8080"
+        VITE_WS_URL: "ws://localhost:8080"
+    container_name: vidhi_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - control_plane

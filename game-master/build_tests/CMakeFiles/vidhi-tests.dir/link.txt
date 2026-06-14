@@ -1,0 +1,1 @@
+/usr/local/bin/c++ -O3 -march=x86-64 -flto -funroll-loops -fno-omit-frame-pointer "CMakeFiles/vidhi-tests.dir/tests/test_persistent_lob.cpp.o" -o vidhi-tests 
