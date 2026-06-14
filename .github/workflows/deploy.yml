@@ -20,7 +20,7 @@ jobs:
       - name: Build and push backend image
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_URL }}
-          docker build -t vidhi-backend backend/
+          docker build -f backend/Dockerfile -t vidhi-backend .
           docker tag vidhi-backend ${{ secrets.ECR_URL }}/vidhi-backend:latest
           docker push ${{ secrets.ECR_URL }}/vidhi-backend:latest
 
