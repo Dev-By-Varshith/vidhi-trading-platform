@@ -19,6 +19,10 @@ jobs:
 
       - name: Build and push backend image
         run: |
+          echo "" > .dockerignore
+          ls -la
+          ls -la backend/
+          ls -la game-master/
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_URL }}
           docker build -f backend/Dockerfile -t vidhi-backend .
           docker tag vidhi-backend ${{ secrets.ECR_URL }}/vidhi-backend:latest
