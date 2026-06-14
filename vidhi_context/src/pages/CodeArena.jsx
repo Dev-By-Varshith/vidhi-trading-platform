@@ -149,7 +149,7 @@ export default function CodeArena() {
         } else if (activeRound.id) {
           // Try to load dataset from backend for this round and cache in IDB
           try {
-            const dsRes = await fetch((import.meta.env.VITE_API_URL || '') + /api/rounds/${activeRound.id}/dataset`);
+            const dsRes = await fetch((import.meta.env.VITE_API_URL || '') + `/api/rounds/${activeRound.id}/dataset`);
             if (dsRes.ok) {
               const dsText = await dsRes.text();
               const key = `round_${activeRound.id}`;
