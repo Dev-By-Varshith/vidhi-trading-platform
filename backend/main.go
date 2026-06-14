@@ -1246,9 +1246,10 @@ func dispatchToGameMaster(soPath, runID, roundID string) (*GameMasterResult, err
 	ticks := "100000" // Fallback
 	botConfig := "MM:1.0"
 	assetName := "public_99k" // Fallback dataset
+	var dbDatasetPath sql.NullString
 	if db != nil {
 		var ticksInt int64
-		err := db.QueryRowContext(ctx, "SELECT tick_count, bot_config, asset_name FROM rounds WHERE id=$1", roundID).Scan(&ticksInt, &botConfig, &assetName)
+		err := db.QueryRowContext(ctx, "SELECT tick_count, bot_config, dataset_path FROM rounds WHERE id=$1", roundID).Scan(&ticksInt, &botConfig, &dbDatasetPath)
 		if err == nil {
 			ticks = fmt.Sprintf("%d", ticksInt)
 		}
@@ -1261,6 +1262,9 @@ func dispatchToGameMaster(soPath, runID, roundID string) (*GameMasterResult, err
 	}
 
 	datasetPath := fmt.Sprintf("./data/ticks/%s.bin", assetName)
+	if dbDatasetPath.Valid && dbDatasetPath.String != "" {
+		datasetPath = dbDatasetPath.String
+	}
 
 	cmd := exec.CommandContext(ctx, cfg.GameMasterBin,
 		"--external-sandbox",
