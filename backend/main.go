@@ -212,10 +212,10 @@ func main() {
 	protected.HandleFunc("/rounds/{round_id}/final-eval", handleFinalEval).Methods("POST")
 
 	handler := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000", "http://localhost:80"},
-		AllowedMethods:   []string{"GET", "POST", "DELETE"},
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-API-Key"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 	}).Handler(r)
 
 	log.Printf("[VIDHI] Control plane v5.1 on :%s", cfg.Port)

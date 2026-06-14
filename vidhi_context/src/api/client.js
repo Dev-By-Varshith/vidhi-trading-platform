@@ -2,7 +2,7 @@
 // Central API client for all backend communication.
 // All fetch calls go through here — handles errors, run polling, WS reconnect.
 
-const BASE = '/api';  // proxied by vite to http://localhost:8080/api
+const BASE = (import.meta.env.VITE_API_URL || '') + '/api';  // proxied by vite to http://localhost:8080/api
 
 // ─── API key helper ───────────────────────────────────────────────────────────
 export function getApiKey() {

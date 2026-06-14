@@ -60,7 +60,7 @@ class ContestStore {
   // ── Backend Sync ──────────────────────────────────────────────────────────
   async fetchContestsFromServer() {
     try {
-      const res = await fetch('/api/contests');
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/contests');
       if (res.ok) {
         const data = await res.json();
         // The backend returns an array of Contests. We'll merge them.
@@ -86,7 +86,7 @@ class ContestStore {
 
     if (role === 'student' && name) {
         try {
-            const res = await fetch('/api/contestants', {
+            const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/contestants', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -99,7 +99,7 @@ class ContestStore {
                this.state.studentId = data.user_id;
                
                // Auto-provision API key
-               const apiKeyRes = await fetch('/api/apikey', {
+               const apiKeyRes = await fetch((import.meta.env.VITE_API_URL || '') + '/api/apikey', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ user_id: data.user_id })
@@ -135,7 +135,7 @@ class ContestStore {
     this._save();
 
     try {
-        const res = await fetch('/api/contests', {
+        const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/contests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -152,7 +152,7 @@ class ContestStore {
            // Now create rounds on backend
            for (let i = 0; i < contest.rounds.length; i++) {
                const r = contest.rounds[i];
-               const rRes = await fetch('/api/rounds', {
+               const rRes = await fetch((import.meta.env.VITE_API_URL || '') + '/api/rounds', {
                    method: 'POST',
                    headers: { 'Content-Type': 'application/json' },
                    body: JSON.stringify({
@@ -197,7 +197,7 @@ class ContestStore {
     this.updateContest(id, { status: 'active', rounds });
 
     try {
-        await fetch('/api/contests', {
+        await fetch((import.meta.env.VITE_API_URL || '') + '/api/contests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -48,7 +48,7 @@ export default function Layout() {
     // Poll /api/health every 15s for infra status
     async function pollHealth() {
       try {
-        const res = await fetch('/api/health');
+        const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/health');
         if (res.ok) {
           const data = await res.json();
           setHealth({ db: data.db, redis: data.redis, worker: data.worker ?? false });

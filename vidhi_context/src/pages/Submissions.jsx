@@ -40,7 +40,7 @@ export default function Submissions() {
   // Fetch credits on mount and after runs
   const fetchCredits = async () => {
     try {
-      const res = await fetch('/api/credits');
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/credits');
       if (res.ok) {
         const data = await res.json();
         setCredits(data.remaining);
