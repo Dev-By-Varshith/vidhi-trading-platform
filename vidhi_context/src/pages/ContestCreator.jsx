@@ -399,12 +399,24 @@ export default function ContestCreator() {
     setForm(f => ({ ...f, rounds: [...f.rounds, { ...BLANK_ROUND, name: `Round ${f.rounds.length + 1}` }] }));
   };
 
-  const saveContest = (publish = false) => {
+  const saveContest = async (publish = false) => {
     if (!form.name.trim()) return;
-    const id = ContestStore.createContest({
+    
+    // We need to wait for the backend to create the contest and rounds
+    // so we can get their IDs (required for uploading CSVs).
+    const createdContest = await ContestStore.createContest({
       ...form,
       status: publish ? 'active' : 'draft',
     });
+    
+    // The createContest method in ContestStore mutates the object we pass it,
+    // but the backend creation happens asynchronously, so we fetch the updated
+    // version from the store to update our form state.
+    const saved = ContestStore.getContest(createdContest);
+    if (saved) {
+      setForm({ ...saved });
+    }
+    
     setSaveAnim(true);
     setTimeout(() => setSaveAnim(false), 1500);
     if (publish) setTab('contests');
