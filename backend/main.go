@@ -204,12 +204,12 @@ func main() {
 	protected.HandleFunc("/runs/{run_id}", handleGetRun).Methods("GET")
 	protected.HandleFunc("/runs/{run_id}/log", handleGetRunLog).Methods("GET")
 	protected.HandleFunc("/credits", handleCredits).Methods("GET")
-	protected.HandleFunc("/contestants", handleRegisterContestant).Methods("POST")
-	protected.HandleFunc("/contests", handleContests).Methods("POST")  // admin: create contest
-	protected.HandleFunc("/rounds", handleCreateRound).Methods("POST") // admin: create round
-	protected.HandleFunc("/rounds/{round_id}/dataset", handleUploadDataset).Methods("POST")
-	protected.HandleFunc("/rounds/{round_id}/final-dataset", handleUploadFinalDataset).Methods("POST")
-	protected.HandleFunc("/rounds/{round_id}/final-eval", handleFinalEval).Methods("POST")
+	r.HandleFunc("/api/contestants", handleRegisterContestant).Methods("POST")
+	r.HandleFunc("/api/contests", handleContests).Methods("POST")  // admin: create contest
+	r.HandleFunc("/api/rounds", handleCreateRound).Methods("POST") // admin: create round
+	r.HandleFunc("/api/rounds/{round_id}/dataset", handleUploadDataset).Methods("POST")
+	r.HandleFunc("/api/rounds/{round_id}/final-dataset", handleUploadFinalDataset).Methods("POST")
+	r.HandleFunc("/api/rounds/{round_id}/final-eval", handleFinalEval).Methods("POST")
 
 	handler := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},
