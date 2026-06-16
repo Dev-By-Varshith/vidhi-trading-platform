@@ -476,6 +476,8 @@ class ContestantRunner {
   _transpile(raw) {
     // Step 0: strip imports, decorators, top-level def
     let src = raw
+      .replace(/"""[\s\S]*?"""/g, '')       // triple-double quotes
+      .replace(/'''[\s\S]*?'''/g, '')       // triple-single quotes
       .replace(/@\w+[^\n]*/g, '')           // decorators
       .replace(/^from\s+\S+\s+import.*$/gm, '')
       .replace(/^import\s+.*$/gm, '')
