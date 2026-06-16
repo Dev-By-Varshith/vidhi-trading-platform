@@ -54,7 +54,7 @@ function ValidationModal({ status, onCancel }) {
   ];
 
   const getStepStatus = (stepId) => {
-    const order = ['scanning', 'transpiling', 'compiling', 'validating', 'queued_gm', 'running', 'done'];
+    const order = ['queued', 'scanning', 'transpiling', 'compiling', 'validating', 'queued_gm', 'running', 'done'];
     const currentIdx = order.indexOf(status);
     const stepIdx = order.indexOf(stepId);
 
@@ -170,7 +170,7 @@ export default function CodeArena() {
     const unsub = VidhiEngine.onStatus((status) => {
       setSimStatus(status);
 
-      if (['scanning', 'transpiling', 'compiling', 'validating'].includes(status)) {
+      if (['queued', 'scanning', 'transpiling', 'compiling', 'validating'].includes(status)) {
         if (!startTimeRef.current) startTimeRef.current = Date.now();
         setShowModal(true);
       }
@@ -188,7 +188,14 @@ export default function CodeArena() {
         }, delay);
       }
 
-      if (status === 'idle' || status === 'done' || status === 'error' || status === 'tle') {
+      if (status === 'error' || status === 'tle') {
+        alert('Compilation or Engine Error: Check browser console or strategy logs for details.');
+        hasNavigatedRef.current = false;
+        setShowModal(false);
+        startTimeRef.current = 0;
+      }
+
+      if (status === 'idle' || status === 'done') {
         hasNavigatedRef.current = false;
         setShowModal(false);
         startTimeRef.current = 0;
