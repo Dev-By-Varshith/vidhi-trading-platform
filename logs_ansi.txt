@@ -1,0 +1,260 @@
+2026/06/13 18:33:50 [DB] Postgres connected ✓
+2026/06/13 18:33:50 [REDIS] Redis connected ✓
+2026/06/13 18:33:50 [WORKER] Starting 10 worker goroutine(s) + reaper
+2026/06/13 18:33:50 [WORKER] Job queue workers started (concurrency=10)
+2026/06/13 18:33:50 [VIDHI] Control plane v5.1 on :8080
+2026/06/13 18:33:50 [WORKER-1] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-2] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-3] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-8] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-5] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-6] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-7] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [REAPER] Started — monitoring active queue for stale jobs
+2026/06/13 18:33:50 [WORKER-9] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-4] Ready — polling vidhi:jobs:pending
+2026/06/13 18:33:50 [WORKER-0] Ready — polling vidhi:jobs:pending
+2026/06/13 18:35:58 [REAPER] Stale job detected: run_9940fa58_1781375054626 — re-enqueueing (retry 2)
+2026/06/13 18:35:58 [WORKER-7] Processing run=run_9940fa58 round=round1 retry=2
+2026/06/13 18:35:58 [WORKER-7] Job failed: so file not found: /tmp/vidhi/so/9940fa58b94515ecbb6b4afcca1db1782f2dcdf231a2070430bd5c3dbacb75e4.so (retry 2/3)
+2026/06/13 18:35:58 [WORKER-5] Processing run=run_9940fa58 round=round1 retry=3
+2026/06/13 18:35:58 [WORKER-5] Job failed: so file not found: /tmp/vidhi/so/9940fa58b94515ecbb6b4afcca1db1782f2dcdf231a2070430bd5c3dbacb75e4.so (retry 3/3)
+2026/06/13 18:35:58 [WORKER-5] Max retries exhausted for run_9940fa58_1781375054626 — marking failed
+2026/06/13 18:37:28 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 18:37:28 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 18:37:32 [FORGE:run_9940fa58] Numba compile ✓ → 9940fa58b94515ecbb6b4afcca1db1782f2dcdf231a2070430bd5c3dbacb75e4.so
+2026/06/13 18:37:32 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 18:37:32 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 18:37:32 [WORKER-0] Processing run=run_9940fa58 round=round1 retry=0
+2026/06/13 18:37:32 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:37:32 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:37:32 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:37:32 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:42:52 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:42:52 [WORKER-0] Job failed: tle: GM timed out after 5 minutes (retry 0/3)
+2026/06/13 18:42:52 [WORKER-1] Processing run=run_9940fa58 round=round1 retry=1
+2026/06/13 18:42:52 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:42:52 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:42:52 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:42:52 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:43:07 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 18:43:08 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 18:43:08 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 18:43:08 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 18:43:08 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 18:43:08 [WORKER-6] Processing run=run_9940fa58 round=round1 retry=0
+2026/06/13 18:43:08 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:43:08 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:43:08 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:43:08 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:48:15 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:48:15 [WORKER-1] Job failed: tle: GM timed out after 5 minutes (retry 1/3)
+2026/06/13 18:48:15 [WORKER-7] Processing run=run_9940fa58 round=round1 retry=2
+2026/06/13 18:48:15 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:48:15 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:48:15 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:48:15 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:48:28 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:48:29 [WORKER-6] Job failed: tle: GM timed out after 5 minutes (retry 0/3)
+2026/06/13 18:48:29 [WORKER-0] Processing run=run_9940fa58 round=round1 retry=1
+2026/06/13 18:48:29 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:48:29 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:48:29 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:48:29 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:53:35 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:53:35 [WORKER-7] Job failed: tle: GM timed out after 5 minutes (retry 2/3)
+2026/06/13 18:53:35 [WORKER-5] Processing run=run_9940fa58 round=round1 retry=3
+2026/06/13 18:53:36 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:53:36 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:53:39 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:53:39 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:53:50 [WORKER-0] Job failed: tle: GM timed out after 5 minutes (retry 1/3)
+2026/06/13 18:53:50 [WORKER-1] Processing run=run_9940fa58 round=round1 retry=2
+2026/06/13 18:53:50 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:53:50 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:53:50 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:53:52 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:53:52 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:56:01 [AUTH] Provisioned API key for user=e2e_mptiwqaz label=e2e
+2026/06/13 18:58:57 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:58:57 [WORKER-5] Job failed: tle: GM timed out after 5 minutes (retry 3/3)
+2026/06/13 18:58:57 [WORKER-5] Max retries exhausted for run_9940fa58_1781375848625 — marking failed
+2026/06/13 18:59:12 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:59:12 [WORKER-1] Job failed: tle: GM timed out after 5 minutes (retry 2/3)
+2026/06/13 18:59:12 [WORKER-5] Processing run=run_9940fa58 round=round1 retry=3
+2026/06/13 18:59:12 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:59:12 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:59:13 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:59:13 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:59:17 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=100, fills=0)
+2026/06/13 18:59:17 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 18:59:32 [AUTH] Provisioned API key for user=e2e_fwlxdxzd label=e2e
+2026/06/13 18:59:32 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 18:59:32 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 18:59:32 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 18:59:32 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 18:59:32 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 18:59:32 [WORKER-1] Processing run=run_9940fa58 round=round1 retry=0
+2026/06/13 18:59:32 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 18:59:32 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 18:59:32 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 18:59:32 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 18:59:36 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=100, fills=0)
+2026/06/13 18:59:36 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 19:00:01 [AUTH] Provisioned API key for user=e2e_durgdvry label=e2e
+2026/06/13 19:00:01 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 19:00:01 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 19:00:01 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 19:00:01 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 19:00:01 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 19:00:01 [WORKER-1] Processing run=run_9940fa58 round=round1 retry=0
+2026/06/13 19:00:01 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 19:00:01 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 19:00:01 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 19:00:01 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 19:00:05 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=100, fills=0)
+2026/06/13 19:00:05 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 19:44:13 [AUTH] Provisioned API key for user=e2e_mgqmyxfl label=e2e
+2026/06/13 19:44:13 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 19:44:13 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 19:44:13 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 19:44:13 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 19:44:13 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 19:44:13 [WORKER-5] Processing run=run_9940fa58 round=round1 retry=0
+2026/06/13 19:44:13 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 19:44:13 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 19:44:14 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 19:44:14 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 19:44:18 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=100, fills=0)
+2026/06/13 19:44:18 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 19:58:27 [AUTH] Provisioned API key for user=k label=IICPC 2026
+2026/06/13 19:58:28 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 19:58:28 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 19:58:28 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 19:58:28 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 19:58:28 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 19:58:28 [WORKER-1] Processing run=run_9940fa58 round=round_contest_1781244897339869747_1781244897348795354 retry=0
+2026/06/13 19:58:28 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 19:58:28 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 19:58:28 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 19:58:28 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 19:58:32 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=99, fills=0)
+2026/06/13 19:58:32 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 19:58:58 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 19:58:58 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 19:58:58 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 19:58:58 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 19:58:58 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 19:58:58 [WORKER-1] Processing run=run_9940fa58 round=round_contest_1781244897339869747_1781244897348795354 retry=0
+2026/06/13 19:58:58 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 19:58:58 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 19:58:58 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 19:58:58 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 19:59:03 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=99, fills=0)
+2026/06/13 19:59:03 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 20:00:12 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 20:00:12 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 20:00:12 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 20:00:12 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 20:00:12 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 20:00:12 [WORKER-1] Processing run=run_9940fa58 round=round_contest_1781244897339869747_1781244897348795354 retry=0
+2026/06/13 20:00:12 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 20:00:12 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 20:00:12 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 20:00:12 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 20:00:16 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=99, fills=0)
+2026/06/13 20:00:17 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/13 20:00:41 [FORGE:run_9f553f6c] AST scan ✓
+2026/06/13 20:00:41 [FORGE:run_9f553f6c] Transpile ✓
+2026/06/13 20:00:45 [FORGE:run_9f553f6c] Numba compile ✓ → 9f553f6cc1d0a614491f8b50733e2241721b8c61e5728d15c57b50a44c612fbc.so
+2026/06/13 20:00:45 [FORGE:run_9f553f6c] ELF valid ✓
+2026/06/13 20:00:45 [SUBMIT:run_9f553f6c] Enqueued to Redis job queue
+2026/06/13 20:00:45 [WORKER-1] Processing run=run_9f553f6c round=round_contest_1781244897339869747_1781244897348795354 retry=0
+2026/06/13 20:00:45 [WORKER] Spawning sandbox for run=run_9f553f6c (async)...
+2026/06/13 20:00:45 [WORKER] Polling /ready/run_9f553f6c...
+2026/06/13 20:00:45 [WORKER] Sandbox container started for run=run_9f553f6c
+2026/06/13 20:00:45 [WORKER] Giving sandbox 3s to connect SHM for run=run_9f553f6c...
+2026/06/13 20:00:49 [COPY] Telemetry batch flush complete for run=run_9f553f6c (ticks=99, fills=0)
+2026/06/13 20:00:49 [WORKER] Sandbox stopped for run=run_9f553f6c
+2026/06/13 20:07:27 [FORGE:run_9940fa58] AST scan ✓
+2026/06/13 20:07:27 [FORGE:run_9940fa58] Transpile ✓
+2026/06/13 20:07:27 [FORGE:run_9940fa58] .so cache hit
+2026/06/13 20:07:27 [FORGE:run_9940fa58] ELF valid ✓
+2026/06/13 20:07:27 [SUBMIT:run_9940fa58] Enqueued to Redis job queue
+2026/06/13 20:07:27 [WORKER-2] Processing run=run_9940fa58 round=round_contest_1781244897339869747_1781244897348795354 retry=0
+2026/06/13 20:07:27 [WORKER] Spawning sandbox for run=run_9940fa58 (async)...
+2026/06/13 20:07:27 [WORKER] Polling /ready/run_9940fa58...
+2026/06/13 20:07:27 [WORKER] Sandbox container started for run=run_9940fa58
+2026/06/13 20:07:27 [WORKER] Giving sandbox 3s to connect SHM for run=run_9940fa58...
+2026/06/13 20:07:31 [COPY] Telemetry batch flush complete for run=run_9940fa58 (ticks=99, fills=0)
+2026/06/13 20:07:31 [WORKER] Sandbox stopped for run=run_9940fa58
+2026/06/16 09:12:36 [WARN] Postgres ping failed: dial tcp 172.19.0.4:5432: connect: connection refused — in-memory mode
+2026/06/16 09:12:36 [REDIS] Redis connected ✓
+2026/06/16 09:12:36 [WORKER] Starting 10 worker goroutine(s) + reaper
+2026/06/16 09:12:36 [WORKER] Job queue workers started (concurrency=10)
+2026/06/16 09:12:36 [VIDHI] Control plane v5.1 on :8080
+2026/06/16 09:12:36 [WORKER-0] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-5] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-6] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-7] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-8] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-9] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-1] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-2] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-3] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [WORKER-4] Ready — polling vidhi:jobs:pending
+2026/06/16 09:12:36 [REAPER] Started — monitoring active queue for stale jobs
+2026/06/16 09:14:52 [AUTH] Provisioned API key for user=e2e_poison_oemvrw label=e2e
+2026/06/16 09:15:14 [AUTH] Provisioned API key for user=e2e_poison_vrxchs label=e2e
+2026/06/16 09:15:14 [RUN:run_663f8677] FAILED — Security scan failed: exit status 1
+{"ok": false, "errors": ["on_tick() missing required arguments: {'orders', 'state'}"], "first_error": "on_tick() missing required arguments: {'orders', 'state'}"}
+2026/06/16 09:15:17 [RUN:run_0137c465] FAILED — Security scan failed: exit status 1
+{"ok": false, "errors": ["Line 2: Banned import 'os'", "on_tick() missing required arguments: {'orders', 'state'}"], "first_error": "Line 2: Banned import 'os'"}
+2026/06/16 09:15:20 [RUN:run_26d6a39d] FAILED — Security scan failed: exit status 1
+{"ok": false, "errors": ["Line 2: Banned import 'urllib.request'", "on_tick() missing required arguments: {'orders', 'state'}"], "first_error": "Line 2: Banned import 'urllib.request'"}
+2026/06/16 09:15:23 [RUN:run_c153c2f5] FAILED — Security scan failed: exit status 1
+{"ok": false, "errors": ["on_tick() missing required arguments: {'orders', 'state'}"], "first_error": "on_tick() missing required arguments: {'orders', 'state'}"}
+2026/06/16 09:17:41 [AUTH] Provisioned API key for user=e2e_poison_gswehb label=e2e
+2026/06/16 09:17:42 [FORGE:run_42dd64ad] Native C++ compile ✓ → 42dd64add86b328471e3120b8ce3adce83174e9e50db246a748631cad45e811b.so
+2026/06/16 09:17:42 [RUN:run_42dd64ad] FAILED — ELF validation failed: missing required export: 'on_tick__cfunc' not found in symbol table
+2026/06/16 09:17:44 [FORGE:run_17160ab6] Native C++ compile ✓ → 17160ab662eead32eb00cd794331c0ad494231e50f541eb5cd4b3ef5a42fbde4.so
+2026/06/16 09:17:44 [RUN:run_17160ab6] FAILED — ELF validation failed: security violation: banned import 'fork' (process forking)
+2026/06/16 09:17:47 [FORGE:run_81700ec7] Native C++ compile ✓ → 81700ec7abbd34aa2682f00b5c6c4d435a2f30eab6a0033e98e4928e2104bd3d.so
+2026/06/16 09:17:47 [RUN:run_81700ec7] FAILED — ELF validation failed: security violation: banned import 'socket' (network access)
+2026/06/16 09:17:50 [FORGE:run_4b862baa] Native C++ compile ✓ → 4b862baae127966824652c31ad0c0bc5e5e7d9ef411e757400f0195c3eacefbc.so
+2026/06/16 09:17:50 [RUN:run_4b862baa] FAILED — ELF validation failed: missing required export: 'on_tick__cfunc' not found in symbol table
+2026/06/16 09:18:46 [AUTH] Provisioned API key for user=e2e_poison_qsxwdx label=e2e
+2026/06/16 09:18:46 [FORGE:run_d5f193d1] Native C++ compile ✓ → d5f193d1ca957534b7b3dbfa4d95f596d4b3ab0fc5d02686a96e86f1a4caa20d.so
+2026/06/16 09:18:46 [FORGE:run_d5f193d1] ELF valid ✓
+2026/06/16 09:18:46 [SUBMIT:run_d5f193d1] Enqueued to Redis job queue
+2026/06/16 09:18:46 [WORKER-6] Processing run=run_d5f193d1 round=round1 retry=0
+2026/06/16 09:18:46 [WORKER] Spawning sandbox for run=run_d5f193d1 (async)...
+2026/06/16 09:18:46 [WORKER] Polling /ready/run_d5f193d1...
+2026/06/16 09:18:47 [WORKER] Sandbox container started for run=run_d5f193d1
+2026/06/16 09:18:47 [WORKER] Giving sandbox 3s to connect SHM for run=run_d5f193d1...
+2026/06/16 09:18:51 [WORKER] Sandbox stopped for run=run_d5f193d1
+2026/06/16 09:20:49 [FORGE:run_22f4b6c8] Native C++ compile ✓ → 22f4b6c8619ed474c900433533b7588791c9a5c7dd3a8aa89bb92118c83977db.so
+2026/06/16 09:20:49 [FORGE:run_22f4b6c8] ELF valid ✓
+2026/06/16 09:20:49 [SUBMIT:run_22f4b6c8] Enqueued to Redis job queue
+2026/06/16 09:20:49 [WORKER-7] Processing run=run_22f4b6c8 round=round1 retry=0
+2026/06/16 09:20:49 [WORKER] Spawning sandbox for run=run_22f4b6c8 (async)...
+2026/06/16 09:20:49 [WORKER] Polling /ready/run_22f4b6c8...
+2026/06/16 09:20:49 [WORKER] Sandbox container started for run=run_22f4b6c8
+2026/06/16 09:20:49 [WORKER] Giving sandbox 3s to connect SHM for run=run_22f4b6c8...
+2026/06/16 09:23:30 [WORKER] Sandbox stopped for run=run_22f4b6c8
+2026/06/16 09:39:11 [AUTH] Provisioned API key for user=e2e_test_user label=IICPC 2026
+2026/06/16 09:39:41 [AUTH] Provisioned API key for user=e2e_test_user label=IICPC 2026
+2026/06/16 09:39:41 [FORGE:run_21022e01] AST scan ✓
+2026/06/16 09:39:41 [FORGE:run_21022e01] Transpile ✓
+2026/06/16 09:39:43 [FORGE:run_21022e01] Numba compile ✓ → 21022e01aa115d54bfed674e3d7523caef2b3a660aec0c7eef02a6fd398e0a3b.so
+2026/06/16 09:39:43 [FORGE:run_21022e01] ELF valid ✓
+2026/06/16 09:39:43 [SUBMIT:run_21022e01] Enqueued to Redis job queue
+2026/06/16 09:39:43 [WORKER-7] Processing run=run_21022e01 round=round1 retry=0
+2026/06/16 09:39:43 [WORKER] Spawning sandbox for run=run_21022e01 (async)...
+2026/06/16 09:39:43 [WORKER] Polling /ready/run_21022e01...
+2026/06/16 09:39:44 [WORKER] Sandbox container started for run=run_21022e01
+2026/06/16 09:39:44 [WORKER] Giving sandbox 3s to connect SHM for run=run_21022e01...
+2026/06/16 09:39:47 [WORKER] Sandbox stopped for run=run_21022e01
+2026/06/16 09:51:20 [RUN:run_22b66162] FAILED — Security scan failed: exit status 1
+{"ok": false, "errors": ["Missing required function 'on_tick(state, orders)'"], "first_error": "Missing required function 'on_tick(state, orders)'"}
+2026/06/16 09:51:29 [AUTH] Provisioned API key for user=anon_5101 label=IICPC 2026

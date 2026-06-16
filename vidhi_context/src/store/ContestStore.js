@@ -13,7 +13,10 @@ const DEFAULT_STATE = {
   activeContestId: null,    // which contest the student has joined
   contests: [],             // all contests (fetched from backend)
   mySubmissions: [],        // this student's submission history across all contests
-  customBots: [],           // GM uploaded custom bots: [{id, name, code}]
+  telemetry: {              // Web Worker / Throttled telemetry stream
+    status: 'offline',      // 'offline' | 'connecting' | 'online'
+    data: {},               // Throttled payload keyed by run_id
+  }
 };
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
@@ -23,6 +26,8 @@ class ContestStore {
     ContestStore.instance = this;
     this._listeners = new Set();
     this._load();
+    this._telemetryDebounceTimer = null;
+    this._telemetryBuffer = {};
     
     // Auto-fetch contests on boot
     this.fetchContestsFromServer();
@@ -77,6 +82,51 @@ class ContestStore {
     }
   }
 
+  // ── Telemetry (WebSocket with Throttling) ──────────────────────────────────
+  connectTelemetry(wsConnectFn) {
+    if (this.state.telemetry.status === 'online') return;
+    
+    this.state.telemetry.status = 'connecting';
+    this._save();
+
+    this._ws = wsConnectFn(
+      // onMessage
+      (data) => {
+        if (data.type === 'TICK_TELEMETRY' && data.run_id) {
+          // Buffer the incoming telemetry data
+          this._telemetryBuffer[data.run_id] = data.payload;
+          
+          // Process buffer every 100ms (10fps UI update) to prevent React freezing
+          if (!this._telemetryDebounceTimer) {
+            this._telemetryDebounceTimer = setTimeout(() => {
+              this.state.telemetry.data = { ...this.state.telemetry.data, ...this._telemetryBuffer };
+              this._telemetryBuffer = {};
+              this._telemetryDebounceTimer = null;
+              this._save();
+            }, 100);
+          }
+        }
+      },
+      // onConnect
+      () => {
+        this.state.telemetry.status = 'online';
+        this._save();
+      },
+      // onDisconnect
+      () => {
+        this.state.telemetry.status = 'offline';
+        this._save();
+      }
+    );
+  }
+
+  disconnectTelemetry() {
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
+  }
+
   // ── Role ──────────────────────────────────────────────────────────────────
   async setRole(role, name = '', team = '') {
     this.state.role = role;
@@ -119,19 +169,39 @@ class ContestStore {
 
   // ── Contests (Creator) ────────────────────────────────────────────────────
   async createContest(data) {
-    const contest = {
-      id: `contest_${Date.now()}`,
-      status: 'draft',
-      createdAt: new Date().toISOString(),
-      participants: [],
-      ...data,
-      rounds: (data.rounds || []).map((r, i) => ({
-        id: `r${i+1}`,
-        status: i === 0 ? 'upcoming' : 'upcoming',
-        ...r,
-      })),
-    };
-    this.state.contests.push(contest);
+    let contest;
+    const isUpdate = data.id && !data.id.startsWith('contest_'); // existing backend ID
+    
+    if (isUpdate) {
+        const idx = this.state.contests.findIndex(c => c.id === data.id);
+        if (idx !== -1) {
+            this.state.contests[idx] = { ...this.state.contests[idx], ...data };
+            contest = this.state.contests[idx];
+        } else {
+            contest = { ...data };
+            this.state.contests.push(contest);
+        }
+    } else {
+        contest = {
+          id: data.id || `contest_${Date.now()}`,
+          status: 'draft',
+          createdAt: new Date().toISOString(),
+          participants: [],
+          ...data,
+          rounds: (data.rounds || []).map((r, i) => ({
+            id: r.id || `r${i+1}`,
+            status: i === 0 ? 'upcoming' : 'upcoming',
+            ...r,
+          })),
+        };
+        // If it's a new draft with a local ID, replace it if it exists or push new
+        const existingIdx = this.state.contests.findIndex(c => c.id === contest.id);
+        if (existingIdx !== -1) {
+            this.state.contests[existingIdx] = contest;
+        } else {
+            this.state.contests.push(contest);
+        }
+    }
     this._save();
 
     try {
@@ -139,6 +209,7 @@ class ContestStore {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                id: isUpdate ? contest.id : undefined,
                 name: contest.name,
                 tick_count: contest.rounds[0]?.tickCount || 100000,
                 phase: 'public'
@@ -149,19 +220,23 @@ class ContestStore {
            contest.id = d.id;
            this._save();
 
-           // Now create rounds on backend
+           // Now create/update rounds on backend
            for (let i = 0; i < contest.rounds.length; i++) {
                const r = contest.rounds[i];
                const rRes = await fetch((import.meta.env.VITE_API_URL || '') + '/api/rounds', {
                    method: 'POST',
                    headers: { 'Content-Type': 'application/json' },
                    body: JSON.stringify({
+                       id: r.id?.startsWith('round_') ? r.id : undefined,
                        contest_id: contest.id,
                        name: r.name,
-                       asset_name: 'public_99k',
-                       bot_config: (r.activeBots || []).map(b => `${b}:1.0`).join(','),
+                       asset_name: r.asset?.name || 'public_99k',
+                       bot_config: (r.activeBots || []).map(b => `${b}:${r.botAggressiveness || 0.5}`).join(','),
                        tick_count: r.tickCount || 100000,
-                       position_limit: 1000
+                       tick_rate: r.tickRate || 1,
+                       position_limit: r.positionLimit || 1000,
+                       starts_at: r.startAt ? new Date(r.startAt).toISOString() : new Date().toISOString(),
+                       ends_at: r.endAt ? new Date(r.endAt).toISOString() : new Date(Date.now() + 7*24*60*60*1000).toISOString()
                    })
                });
                if (rRes.ok) {
@@ -215,20 +290,6 @@ class ContestStore {
 
   deleteContest(id) {
     this.state.contests = this.state.contests.filter(c => c.id !== id);
-    this._save();
-  }
-
-  // ── Custom Bots (GM) ──────────────────────────────────────────────────────
-  addCustomBot(name, code) {
-    const id = `BOT_CUSTOM_${Date.now()}`;
-    if (!this.state.customBots) this.state.customBots = [];
-    this.state.customBots.push({ id, name, code });
-    this._save();
-  }
-
-  removeCustomBot(id) {
-    if (!this.state.customBots) return;
-    this.state.customBots = this.state.customBots.filter(b => b.id !== id);
     this._save();
   }
 
@@ -304,13 +365,37 @@ class ContestStore {
 
   // ── Getters ───────────────────────────────────────────────────────────────
   getActiveContest() {
-    return this.state.contests.find(c => c.id === this.state.activeContestId) || null;
+    const explicit = this.state.contests.find(c => c.id === this.state.activeContestId);
+    if (explicit) return explicit;
+
+    const liveContest = this.state.contests.find(c =>
+      c.status === 'active' && (c.rounds || []).some(r => r.status === 'active')
+    );
+    if (liveContest) {
+      this.state.activeContestId = liveContest.id;
+      this._save();
+      return liveContest;
+    }
+
+    const fallback = this.state.contests[0] || null;
+    if (fallback && !this.state.activeContestId) {
+      this.state.activeContestId = fallback.id;
+      this._save();
+    }
+    return fallback;
   }
   getActiveRoundId() {
     const c = this.getActiveContest();
     if (!c) return null;
     const activeRound = c.rounds.find(r => r.status === 'active');
-    return activeRound ? activeRound.id : null;
+    if (activeRound) return activeRound.id;
+
+    const firstRound = c.rounds[0] || null;
+    if (firstRound) {
+      firstRound.status = firstRound.status || 'active';
+      return firstRound.id;
+    }
+    return null;
   }
   getContest(id) {
     return this.state.contests.find(c => c.id === id) || null;
@@ -321,6 +406,137 @@ class ContestStore {
     return [...c.participants]
       .sort((a, b) => b.pnlPct - a.pnlPct)
       .map((p, i) => ({ ...p, rank: i + 1 }));
+  }
+
+  async resetAndCreateDemoContests() {
+    this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+
+    // Create Contest 1: IICPC ALGO TRADING SHOWCASE 1
+    const contest1 = {
+      id: `contest_${Date.now()}_1`,
+      name: 'IICPC ALGO TRADING SHOWCASE 1',
+      description: 'First showcase contest with Earth Fruit, Mars Banana, and Moon Peanut!',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      maxParticipants: 100,
+      participants: [],
+      rounds: [
+        {
+          id: `r1_${Date.now()}`,
+          name: 'Round 1 — Earth Fruit (99.99k ticks)',
+          description: 'First round featuring Earth Fruit!',
+          status: 'active',
+          tickCount: 100000,
+          tickRate: 1,
+          positionLimit: 1000,
+          startingCapital: 100000,
+          activeBots: ['MM', 'MOM', 'MR', 'NOISE', 'SNIPER'],
+          botAggressiveness: 0.7,
+          asset: { name: 'EARTH-FRUIT' },
+          testDataName: 'earth_fruit_test.csv',
+          testDataKey: 'earth_fruit_test.csv',
+          finalDataName: 'earth_fruit_final.csv',
+          finalDataKey: 'earth_fruit_final.csv',
+          startAt: new Date(Date.now()).toISOString(),
+          endAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+        {
+          id: `r2_${Date.now()}`,
+          name: 'Round 2 — Mars Banana (99.99k ticks)',
+          description: 'Second round featuring Mars Banana!',
+          status: 'upcoming',
+          tickCount: 100000,
+          tickRate: 1,
+          positionLimit: 1000,
+          startingCapital: 100000,
+          activeBots: ['MM', 'MOM', 'MR', 'NOISE', 'SNIPER'],
+          botAggressiveness: 0.7,
+          asset: { name: 'MARS-BANANA' },
+          testDataName: 'mars_banana_test.csv',
+          testDataKey: 'mars_banana_test.csv',
+          finalDataName: 'mars_banana_final.csv',
+          finalDataKey: 'mars_banana_final.csv',
+          startAt: new Date(Date.now() + 70 * 60 * 1000).toISOString(),
+          endAt: new Date(Date.now() + 130 * 60 * 1000).toISOString(),
+        },
+        {
+          id: `r3_${Date.now()}`,
+          name: 'Round 3 — Moon Peanut (99.99k ticks)',
+          description: 'Third round featuring Moon Peanut!',
+          status: 'upcoming',
+          tickCount: 100000,
+          tickRate: 1,
+          positionLimit: 1000,
+          startingCapital: 100000,
+          activeBots: ['MM', 'MOM', 'MR', 'NOISE', 'SNIPER'],
+          botAggressiveness: 0.8,
+          asset: { name: 'MOON-PEANUT' },
+          testDataName: 'moon_peanut_test.csv',
+          testDataKey: 'moon_peanut_test.csv',
+          finalDataName: 'moon_peanut_final.csv',
+          finalDataKey: 'moon_peanut_final.csv',
+          startAt: new Date(Date.now() + 140 * 60 * 1000).toISOString(),
+          endAt: new Date(Date.now() + 200 * 60 * 1000).toISOString(),
+        },
+      ],
+    };
+
+    // Create Contest 2: IICPC ALGO TRADING SHOWCASE 2
+    const contest2 = {
+      id: `contest_${Date.now()}_2`,
+      name: 'IICPC ALGO TRADING SHOWCASE 2',
+      description: 'Second showcase contest with Grass Cane and Mango!',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      maxParticipants: 100,
+      participants: [],
+      rounds: [
+        {
+          id: `r1_${Date.now() + 1}`,
+          name: 'Round 1 — Grass Cane (99.99k ticks)',
+          description: 'First round featuring Grass Cane!',
+          status: 'active',
+          tickCount: 100000,
+          tickRate: 1,
+          positionLimit: 1000,
+          startingCapital: 100000,
+          activeBots: ['MM', 'MOM', 'MR', 'NOISE', 'SNIPER'],
+          botAggressiveness: 0.7,
+          asset: { name: 'GRASS-CANE' },
+          testDataName: 'grass_cane_test.csv',
+          testDataKey: 'grass_cane_test.csv',
+          finalDataName: 'grass_cane_final.csv',
+          finalDataKey: 'grass_cane_final.csv',
+          startAt: new Date(Date.now()).toISOString(),
+          endAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+        {
+          id: `r2_${Date.now() + 1}`,
+          name: 'Round 2 — Mango (99.99k ticks)',
+          description: 'Second round featuring Mango!',
+          status: 'upcoming',
+          tickCount: 100000,
+          tickRate: 1,
+          positionLimit: 1000,
+          startingCapital: 100000,
+          activeBots: ['MM', 'MOM', 'MR', 'NOISE', 'SNIPER'],
+          botAggressiveness: 0.8,
+          asset: { name: 'MANGO' },
+          testDataName: 'mango_test.csv',
+          testDataKey: 'mango_test.csv',
+          finalDataName: 'mango_final.csv',
+          finalDataKey: 'mango_final.csv',
+          startAt: new Date(Date.now() + 70 * 60 * 1000).toISOString(),
+          endAt: new Date(Date.now() + 130 * 60 * 1000).toISOString(),
+        },
+      ],
+    };
+
+    this.state.contests = [contest1, contest2];
+    this.state.activeContestId = contest1.id; // Auto-select first demo contest
+    this._save();
   }
 
   reset() {

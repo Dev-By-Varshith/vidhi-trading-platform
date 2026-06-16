@@ -18,8 +18,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"encoding/binary"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -67,6 +69,46 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+func resolveDatasetPath(stored string, ticks int64, preferFinal bool) string {
+	candidates := []string{}
+	fileName := strings.TrimSpace(stored)
+
+	defaultName := "public_99k.bin"
+	if preferFinal || ticks > 100000 {
+		defaultName = "eval_1m.bin"
+	}
+
+	if fileName != "" {
+		if filepath.IsAbs(fileName) {
+			candidates = append(candidates, fileName)
+		}
+		candidates = append(candidates,
+			fileName,
+			filepath.Join(".", "data", "ticks", filepath.Base(fileName)),
+			filepath.Join("backend", "data", "ticks", filepath.Base(fileName)),
+			filepath.Join("/app", "data", "ticks", filepath.Base(fileName)),
+		)
+	}
+
+	candidates = append(candidates,
+		filepath.Join(".", "data", "ticks", defaultName),
+		filepath.Join("backend", "data", "ticks", defaultName),
+		filepath.Join("/app", "data", "ticks", defaultName),
+		defaultName,
+	)
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return filepath.Join(".", "data", "ticks", defaultName)
+}
+
 // ─── Domain types ─────────────────────────────────────────────────────────────
 type SubmitResponse struct {
 	RunID   string `json:"run_id"`
@@ -79,6 +121,7 @@ type RunResult struct {
 	RunID       string    `json:"run_id"`
 	UserID      string    `json:"user_id"`
 	RoundID     string    `json:"round_id"`
+	IsPractice  bool      `json:"is_practice"`
 	Status      string    `json:"status"`
 	PnL         float64   `json:"pnl"`
 	PnLPct      float64   `json:"pnl_pct"`
@@ -201,8 +244,11 @@ func main() {
 	protected := r.PathPrefix("/api").Subrouter()
 	protected.Use(auth.Middleware(db))
 	protected.HandleFunc("/submit", handleSubmit).Methods("POST")
+	protected.HandleFunc("/runs", handleListRuns).Methods("GET")
 	protected.HandleFunc("/runs/{run_id}", handleGetRun).Methods("GET")
 	protected.HandleFunc("/runs/{run_id}/log", handleGetRunLog).Methods("GET")
+	protected.HandleFunc("/runs/{run_id}/execution-log", handleGetExecutionLog).Methods("GET")
+	protected.HandleFunc("/runs/{run_id}/code", handleGetRunCode).Methods("GET")
 	protected.HandleFunc("/credits", handleCredits).Methods("GET")
 	r.HandleFunc("/api/contestants", handleRegisterContestant).Methods("POST")
 	r.HandleFunc("/api/contests", handleContests).Methods("POST")  // admin: create contest
@@ -210,6 +256,8 @@ func main() {
 	r.HandleFunc("/api/rounds/{round_id}/dataset", handleUploadDataset).Methods("POST")
 	r.HandleFunc("/api/rounds/{round_id}/final-dataset", handleUploadFinalDataset).Methods("POST")
 	r.HandleFunc("/api/rounds/{round_id}/final-eval", handleFinalEval).Methods("POST")
+	// New endpoint to download test datasets
+	r.HandleFunc("/api/datasets/{filename}", handleDownloadDataset).Methods("GET")
 
 	handler := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},
@@ -251,6 +299,9 @@ func handleSubmit(w http.ResponseWriter, r *http.Request) {
 	// Use the authenticated user_id (from X-API-Key) — never trust the form value
 	userID := auth.GetUserID(r)
 	roundID := r.FormValue("round_id")
+	botConfig := r.FormValue("bot_config") // Step 3: Receive bot config
+	isPractice := r.FormValue("is_practice") == "true"
+
 	if roundID == "" {
 		if db != nil {
 			err := db.QueryRowContext(r.Context(), `SELECT id FROM rounds WHERE status='active' ORDER BY starts_at DESC LIMIT 1`).Scan(&roundID)
@@ -259,6 +310,21 @@ func handleSubmit(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			roundID = "round1"
+		}
+	}
+
+	if db != nil {
+		var startsAt, endsAt time.Time
+		err := db.QueryRowContext(r.Context(), `SELECT starts_at, ends_at FROM rounds WHERE id=$1`, roundID).Scan(&startsAt, &endsAt)
+		if err == nil {
+			if time.Now().Before(startsAt) {
+				writeError(w, 403, "Round has not started yet")
+				return
+			}
+			if time.Now().After(endsAt) {
+				writeError(w, 403, "Round has ended")
+				return
+			}
 		}
 	}
 
@@ -277,20 +343,26 @@ func handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// ── Credit check (all rounds — Redis atomic Lua script) ──────────────────
 	// Every submission costs 1 credit regardless of round. Daily limit enforced.
-	ledger := credits.NewLedger(redisClient)
-	if err := ledger.DeductCredit(r.Context(), userID, cfg.CreditsPerDay); err != nil {
-		if errors.Is(err, credits.ErrDailyLimitReached) {
-			writeError(w, 429, fmt.Sprintf("daily limit reached (%d/day). Resets at midnight UTC.", cfg.CreditsPerDay))
-			return
+	// Skip for practice runs.
+	if !isPractice {
+		ledger := credits.NewLedger(redisClient)
+		if err := ledger.DeductCredit(r.Context(), userID, cfg.CreditsPerDay); err != nil {
+			if errors.Is(err, credits.ErrDailyLimitReached) {
+				writeError(w, 429, fmt.Sprintf("daily limit reached (%d/day). Resets at midnight UTC.", cfg.CreditsPerDay))
+				return
+			}
+			// Log but don't block — Redis unavailable should not prevent submission
+			log.Printf("[CREDIT] Error deducting credits for %s: %v", userID, err)
 		}
-		// Log but don't block — Redis unavailable should not prevent submission
-		log.Printf("[CREDIT] Error deducting credits for %s: %v", userID, err)
 	}
 
 	// SHA256 dedup
 	hash := fmt.Sprintf("%x", sha256.Sum256(codeBytes))
 	soPath := filepath.Join(cfg.SoCache, hash+".so")
 	runID := fmt.Sprintf("run_%s_%d", hash[:8], time.Now().UnixMilli())
+	
+	pyPath := filepath.Join(cfg.SoCache, runID+".py")
+	os.WriteFile(pyPath, codeBytes, 0644)
 
 	// Ensure contestant exists in DB
 	if db != nil {
@@ -299,18 +371,19 @@ func handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run := &RunResult{
-		RunID:     runID,
-		UserID:    userID,
-		RoundID:   roundID,
-		Status:    "queued",
-		StartedAt: time.Now(),
+		RunID:      runID,
+		UserID:     userID,
+		RoundID:    roundID,
+		IsPractice: isPractice,
+		Status:     "queued",
+		StartedAt:  time.Now(),
 	}
 	cacheRun(run)
 	if db != nil {
 		persistRun(run)
 	}
 
-	go runForgePipeline(codeBytes, hash, soPath, runID, userID, roundID)
+	go runForgePipeline(codeBytes, hash, soPath, runID, userID, roundID, botConfig)
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(SubmitResponse{
@@ -468,32 +541,44 @@ func handleGetRunLog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var sb strings.Builder
-	sb.WriteString("day;timestamp;product;bid_price_1;bid_volume_1;bid_price_2;bid_volume_2;bid_price_3;bid_volume_3;ask_price_1;ask_volume_1;ask_price_2;ask_volume_2;ask_price_3;ask_volume_3;mid_price;profit_and_loss\n")
-
-	hasRows := false
+	var data []map[string]interface{}
 	for rows.Next() {
-		hasRows = true
 		var tickID int64
 		var bid, ask, pnl float64
-		if err := rows.Scan(&tickID, &bid, &ask, &pnl); err != nil {
-			continue
+		if err := rows.Scan(&tickID, &bid, &ask, &pnl); err == nil {
+			data = append(data, map[string]interface{}{
+				"tick_id":   tickID,
+				"bid_price": bid,
+				"ask_price": ask,
+				"pnl":       pnl,
+			})
 		}
-		mid := (bid + ask) / 2.0
-		// format: day;timestamp;product;bid1;vol1;;;;;ask1;vol1;;;;;mid;pnl
-		sb.WriteString(fmt.Sprintf("3;%d;VIDHI_ASSET;%.2f;1;;;;;%.2f;1;;;;;%.2f;%.2f\n",
-			tickID*100, bid, ask, mid, pnl))
 	}
-    
-	if !hasRows {
-		writeError(w, 404, "no telemetry found for run")
+	json.NewEncoder(w).Encode(data)
+}
+
+// GET /api/runs/{run_id}/execution-log
+func handleGetExecutionLog(w http.ResponseWriter, r *http.Request) {
+	runID := mux.Vars(r)["run_id"]
+	logPath := filepath.Join(cfg.SoCache, runID+".log")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		writeError(w, 404, "execution log not found")
 		return
 	}
+	w.Header().Set("Content-Type", "text/plain")
+	http.ServeFile(w, r, logPath)
+}
 
-	json.NewEncoder(w).Encode(map[string]string{
-		"submissionId": runID,
-		"activitiesLog": sb.String(),
-	})
+// GET /api/runs/{run_id}/code
+func handleGetRunCode(w http.ResponseWriter, r *http.Request) {
+	runID := mux.Vars(r)["run_id"]
+	pyPath := filepath.Join(cfg.SoCache, runID+".py")
+	if _, err := os.Stat(pyPath); os.IsNotExist(err) {
+		writeError(w, 404, "source code not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/x-python")
+	http.ServeFile(w, r, pyPath)
 }
 
 // GET /api/leaderboard
@@ -579,6 +664,14 @@ func handleRegisterContestant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if db != nil {
+		// Check if the contest has already started
+		var startsAt time.Time
+		err := db.QueryRowContext(r.Context(), `SELECT starts_at FROM contests WHERE status='active' ORDER BY starts_at ASC LIMIT 1`).Scan(&startsAt)
+		if err == nil && time.Now().After(startsAt) {
+			writeError(w, 403, "registration is closed (contest has already started)")
+			return
+		}
+
 		db.ExecContext(context.Background(), `
 			INSERT INTO contestants(id, display_name, team_name)
 			VALUES($1,$2,$3)
@@ -885,11 +978,17 @@ func handleDatasetUpload(w http.ResponseWriter, r *http.Request, isFinal bool) {
 	}
 	defer file.Close()
 
-	os.MkdirAll("/app/data/ticks", 0755)
-	tmpPath := filepath.Join("/app/data/ticks", header.Filename)
+	// FIX: Use relative data path for local development
+	dataDir := filepath.Join(".", "data", "ticks")
+	if _, err := os.Stat("backend"); err == nil {
+		dataDir = filepath.Join("backend", "data", "ticks")
+	}
+	os.MkdirAll(dataDir, 0755)
+	
+	tmpPath := filepath.Join(dataDir, header.Filename)
 	out, err := os.Create(tmpPath)
 	if err != nil {
-		writeError(w, 500, "failed to create temp file")
+		writeError(w, 500, "failed to create dataset file: "+err.Error())
 		return
 	}
 	io.Copy(out, file)
@@ -902,16 +1001,29 @@ func handleDatasetUpload(w http.ResponseWriter, r *http.Request, isFinal bool) {
 		if isFinal {
 			binFileName = "final_" + binFileName
 		}
-		binPath = filepath.Join("/app/data/ticks", binFileName)
-		cmd := exec.Command("python3", "scripts/generate_datasets.py", "--csv", tmpPath, "--out", binPath)
+		binPath = filepath.Join(dataDir, binFileName)
+		
+		pyCmd := "python3"
+		if runtime.GOOS == "windows" {
+			pyCmd = "python"
+		}
+		
+		// Use absolute path for script
+		scriptPath := filepath.Join(".", "scripts", "generate_datasets.py")
+		if _, err := os.Stat(scriptPath); err != nil {
+			scriptPath = filepath.Join("backend", "scripts", "generate_datasets.py")
+		}
+
+		cmd := exec.Command(pyCmd, scriptPath, "--csv", tmpPath, "--out", binPath)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
-			log.Printf("[DATASET] Failed to convert CSV: %v", err)
-			writeError(w, 500, "failed to convert CSV to binary format")
+			log.Printf("[DATASET] Failed to convert CSV: %v (stderr: %s)", err, stderr.String())
+			writeError(w, 400, "Malformed CSV or conversion error: "+stderr.String())
 			return
 		}
 		os.Remove(tmpPath) // clean up csv
 	} else {
-		// Assuming it's already a bin
 		binPath = tmpPath
 	}
 
@@ -920,14 +1032,16 @@ func handleDatasetUpload(w http.ResponseWriter, r *http.Request, isFinal bool) {
 		if isFinal {
 			col = "final_dataset_path"
 		}
-		_, err := db.ExecContext(r.Context(), fmt.Sprintf(`UPDATE rounds SET %s=$1 WHERE id=$2`, col), binPath, roundID)
+		// Convert absolute/local path to relative path for database consistency
+		dbPath := filepath.Base(binPath)
+		_, err := db.ExecContext(r.Context(), fmt.Sprintf(`UPDATE rounds SET %s=$1 WHERE id=$2`, col), dbPath, roundID)
 		if err != nil {
-			writeError(w, 500, "failed to update round dataset path")
+			writeError(w, 500, "failed to update database: "+err.Error())
 			return
 		}
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "path": binPath})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "path": binPath, "round_id": roundID})
 }
 
 // POST /api/rounds/{round_id}/dataset
@@ -941,6 +1055,20 @@ func handleUploadFinalDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/rounds/{round_id}/final-eval
+func handleDownloadDataset(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	filename := vars["filename"]
+	filePath := resolveDatasetPath(filename, 100000, strings.Contains(strings.ToLower(filename), "final"))
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		writeError(w, http.StatusNotFound, "Dataset not found")
+		return
+	}
+	// Serve file
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(filePath))
+	http.ServeFile(w, r, filePath)
+}
+
 func handleFinalEval(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	roundID := mux.Vars(r)["round_id"]
@@ -981,11 +1109,12 @@ func handleFinalEval(w http.ResponseWriter, r *http.Request) {
 		persistRun(run)
 
 		job := worker.RunJob{
-			RunID:   runID,
-			UserID:  userID,
-			SoPath:  soPath,
-			RoundID: roundID,
-			Retries: 0,
+			RunID:     runID,
+			UserID:    userID,
+			SoPath:    soPath,
+			RoundID:   roundID,
+			BotConfig: "", // Step 3: Pass custom bot config to worker
+			Retries:   0,
 		}
 		worker.Enqueue(redisClient, job)
 		jobs = append(jobs, runID)
@@ -1038,7 +1167,7 @@ func releaseHashLock(hash string, entry *hashLockEntry) {
 	hashLocksMu.Unlock()
 }
 
-func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID string) {
+func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID, botConfig string) {
 	entry := acquireHashLock(hash)
 	defer releaseHashLock(hash, entry)
 
@@ -1096,6 +1225,8 @@ func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID string) 
 		log.Printf("[FORGE:%s] AST scan ✓", runID[:12])
 
 		// ── Step 2: Transpiler
+		updateRunStatus(runID, "transpiling")
+		broadcastRunUpdate(runID)
 		transformedPath := filepath.Join("/tmp/vidhi", hash+"_transformed.py")
 		if _, err := runPythonForge("transpiler.py", rawPath, transformedPath); err != nil {
 			failRun(runID, "transpiler failed: "+err.Error())
@@ -1104,6 +1235,8 @@ func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID string) 
 		log.Printf("[FORGE:%s] Transpile ✓", runID[:12])
 
 		// ── Step 3: Numba AOT → .so
+		updateRunStatus(runID, "compiling")
+		broadcastRunUpdate(runID)
 		if _, err := os.Stat(soPath); os.IsNotExist(err) {
 			if _, err := runPythonForge("forge.py", transformedPath, soPath); err != nil {
 				failRun(runID, "forge/numba failed: "+err.Error())
@@ -1116,10 +1249,14 @@ func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID string) 
 	}
 
 	// ── Step 4: ELF Validation (Go-native analysis) ───────────────────────────
-	if err := validator.ValidateContestantBinary(soPath); err != nil {
-		os.Remove(soPath)
-		failRun(runID, "ELF validation failed: "+err.Error())
-		return
+	updateRunStatus(runID, "validating")
+	broadcastRunUpdate(runID)
+	if runtime.GOOS != "windows" {
+		if err := validator.ValidateContestantBinary(soPath); err != nil {
+			os.Remove(soPath)
+			failRun(runID, "ELF validation failed: "+err.Error())
+			return
+		}
 	}
 	log.Printf("[FORGE:%s] ELF valid ✓", runID[:12])
 
@@ -1151,7 +1288,7 @@ func runForgePipeline(code []byte, hash, soPath, runID, userID, roundID string) 
 	updateRunStatus(runID, "running")
 	broadcastRunUpdate(runID)
 
-	result, err := dispatchToGameMaster(soPath, runID, roundID)
+	result, err := dispatchToGameMaster(soPath, runID, roundID, botConfig)
 	if err != nil {
 		failRun(runID, "execution failed: "+err.Error())
 		broadcastRunUpdate(runID)
@@ -1221,7 +1358,11 @@ func maybeRefreshLeaderboard() {
 func runPythonForge(script string, args ...string) (string, error) {
 	scriptPath := filepath.Join(cfg.ForgeDir, script)
 	cmdArgs := append([]string{scriptPath}, args...)
-	cmd := exec.Command("python3", cmdArgs...)
+	pyCmd := "python3"
+	if runtime.GOOS == "windows" {
+		pyCmd = "C:\\Users\\varsh\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+	}
+	cmd := exec.Command(pyCmd, cmdArgs...)
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Dir(cfg.ForgeDir))
 	out, err := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
@@ -1239,47 +1380,154 @@ type GameMasterResult struct {
 }
 
 // dispatchToGameMaster spawns the vidhi-gm binary and parses its JSON output
-func dispatchToGameMaster(soPath, runID, roundID string) (*GameMasterResult, error) {
+func dispatchToGameMaster(soPath, runID, roundID, botConfig string) (*GameMasterResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	ticks := "100000" // Fallback
-	botConfig := "MM:1.0"
-	assetName := "public_99k" // Fallback dataset
+	roundBotConfig := "MM:1.0"
+	// assetName := "public_99k" // Fallback dataset
 	var dbDatasetPath sql.NullString
 	if db != nil {
 		var ticksInt int64
-		err := db.QueryRowContext(ctx, "SELECT tick_count, bot_config, dataset_path FROM rounds WHERE id=$1", roundID).Scan(&ticksInt, &botConfig, &dbDatasetPath)
+		err := db.QueryRowContext(ctx, "SELECT tick_count, bot_config, dataset_path FROM rounds WHERE id=$1", roundID).Scan(&ticksInt, &roundBotConfig, &dbDatasetPath)
 		if err == nil {
 			ticks = fmt.Sprintf("%d", ticksInt)
 		}
 	}
 
-	// Check if the binary exists; fall back to stub result in dev
+	// Step 3: Use provided botConfig if not empty, else use round default
+	actualBotConfig := roundBotConfig
+	if botConfig != "" {
+		actualBotConfig = botConfig
+	}
+
+	datasetPath := resolveDatasetPath(dbDatasetPath.String, parseTicksOrDefault(ticks, 100000), false)
+
+	var cmd *exec.Cmd
+
+	// Check if the binary exists; fall back to Python local_gm.py in dev/windows
 	if _, err := os.Stat(cfg.GameMasterBin); os.IsNotExist(err) {
-		log.Printf("[GM] Binary not found at %s — returning dev stub result", cfg.GameMasterBin)
-		return devStubResult(), nil
+		log.Printf("[GM] Using Python local GM fallback for %s", runID)
+		pyExe := "python3"
+		if runtime.GOOS == "windows" {
+			pyExe = "C:\\Users\\varsh\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+		}
+		cmd = exec.CommandContext(ctx, pyExe, "forge/local_gm.py",
+			"--so", soPath,
+			"--ticks", ticks,
+			"--run-id", runID,
+			"--dataset", datasetPath,
+		)
+	} else {
+		cmd = exec.CommandContext(ctx, cfg.GameMasterBin,
+			"--so", soPath,
+			"--ticks", ticks,
+			"--bot-config", actualBotConfig,
+			"--run-id", runID,
+			"--dataset", datasetPath,
+		)
+	}
+	
+	pr, pw := io.Pipe()
+	var stderr bytes.Buffer
+	cmd.Stdout = pw
+	cmd.Stderr = &stderr
+	
+	err := cmd.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start Game Master: %v", err)
 	}
 
-	datasetPath := fmt.Sprintf("./data/ticks/%s.bin", assetName)
-	if dbDatasetPath.Valid && dbDatasetPath.String != "" {
-		datasetPath = dbDatasetPath.String
-	}
+	var jsonResult []byte
+	var wg sync.WaitGroup
+	wg.Add(1)
 
-	cmd := exec.CommandContext(ctx, cfg.GameMasterBin,
-		"--external-sandbox",
-		"--so", soPath,
-		"--ticks", ticks,
-		"--bot-config", botConfig,
-		"--run-id", runID,
-		"--dataset", datasetPath,
-	)
-	out, err := cmd.Output()
+	go func() {
+		defer wg.Done()
+		for {
+			var packetType uint8
+			if err := binary.Read(pr, binary.LittleEndian, &packetType); err != nil {
+				break
+			}
+			
+			if packetType == '{' {
+				rest, _ := io.ReadAll(pr)
+				jsonResult = append([]byte{'{'}, rest...)
+				break
+			}
+			
+			if packetType == 0x01 {
+				var row struct {
+					TickID     int64
+					PnLFP      int64
+					Pos        int64
+					LatP50     int64
+					LatP99     int64
+					BidPrice   float64
+					AskPrice   float64
+					Spread     float64
+					LastTrade  float64
+					FillCount  int32
+					Pad        [4]byte
+				}
+				if err := binary.Read(pr, binary.LittleEndian, &row); err != nil { break }
+				
+				pnl := float64(row.PnLFP) / 1_000_000.0
+				pnlPct := (pnl / 100_000.0) * 100.0
+
+				runCacheMu.Lock()
+				if r, ok := runCache[runID]; ok {
+					r.TotalTicks = row.TickID
+					r.PnL = pnl
+					r.PnLPct = pnlPct
+					r.P50NS = float64(row.LatP50)
+					r.P99NS = float64(row.LatP99)
+				}
+				runCacheMu.Unlock()
+
+				wsMsg, _ := json.Marshal(map[string]any{
+					"type":   "TICK_TELEMETRY",
+					"run_id": runID,
+					"payload": map[string]any{
+						"tick_id":    row.TickID,
+						"pnl":        pnl,
+						"pos":        row.Pos,
+						"p50_ns":     row.LatP50,
+						"p99_ns":     row.LatP99,
+						"bid_price":  row.BidPrice,
+						"ask_price":  row.AskPrice,
+						"spread":     row.Spread,
+						"last_trade": row.LastTrade,
+						"fill_count": row.FillCount,
+					},
+				})
+				wsMu.Lock()
+				for conn := range wsClients {
+					conn.WriteMessage(websocket.TextMessage, wsMsg)
+				}
+				wsMu.Unlock()
+			} else if packetType == 0x02 {
+				io.CopyN(io.Discard, pr, 39)
+			}
+		}
+	}()
+
+	err = cmd.Wait()
+	pw.Close()
+	wg.Wait()
+
+	out := append(stderr.Bytes(), jsonResult...)
+	
+	// Save the raw log for the contestant to download
+	logPath := filepath.Join(cfg.SoCache, runID+".log")
+	os.WriteFile(logPath, out, 0644)
+
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("game master timeout after 5m")
 		}
-		return nil, fmt.Errorf("game master exit error: %v", err)
+		return nil, fmt.Errorf("game master exit error: %v, output: %s", err, string(out))
 	}
 
 	var res struct {
@@ -1296,11 +1544,11 @@ func dispatchToGameMaster(soPath, runID, roundID string) (*GameMasterResult, err
 		Violations  int64   `json:"violations"`
 	}
 	// Trim any stderr prefix (gm writes progress to stderr, result to stdout)
-	jsonStart := bytes.IndexByte(out, '{')
+	jsonStart := bytes.IndexByte(jsonResult, '{')
 	if jsonStart < 0 {
 		return nil, fmt.Errorf("no JSON in GM output: %s", string(out))
 	}
-	if err := json.Unmarshal(out[jsonStart:], &res); err != nil {
+	if err := json.Unmarshal(jsonResult[jsonStart:], &res); err != nil {
 		return nil, fmt.Errorf("parse GM output: %v — raw: %s", err, string(out))
 	}
 
@@ -1331,6 +1579,14 @@ func devStubResult() *GameMasterResult {
 	}
 }
 
+func parseTicksOrDefault(raw string, fallback int64) int64 {
+	var ticks int64
+	if _, err := fmt.Sscanf(raw, "%d", &ticks); err != nil || ticks <= 0 {
+		return fallback
+	}
+	return ticks
+}
+
 // ─── Persistence helpers ──────────────────────────────────────────────────────
 
 func persistRun(r *RunResult) {
@@ -1339,6 +1595,12 @@ func persistRun(r *RunResult) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// If practice, we don't associate with a round_id so it stays off the leaderboard
+	var roundID sql.NullString
+	if !r.IsPractice && r.RoundID != "" {
+		roundID = sql.NullString{String: r.RoundID, Valid: true}
+	}
 
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, user_id, round_id, status, pnl, pnl_pct, p50_ns, p90_ns, p99_ns, total_fills, total_ticks, tle_count, correctness, violations, started_at, completed_at)
@@ -1349,7 +1611,7 @@ func persistRun(r *RunResult) {
 			total_fills=EXCLUDED.total_fills, total_ticks=EXCLUDED.total_ticks,
 			tle_count=EXCLUDED.tle_count, correctness=EXCLUDED.correctness, violations=EXCLUDED.violations,
 			completed_at=EXCLUDED.completed_at`,
-		r.RunID, r.UserID, r.RoundID, r.Status, r.PnL, r.PnLPct, r.P50NS, r.P90NS, r.P99NS,
+		r.RunID, r.UserID, roundID, r.Status, r.PnL, r.PnLPct, r.P50NS, r.P90NS, r.P99NS,
 		r.TotalFills, r.TotalTicks, r.TLECount, r.Correctness, r.Violations, r.StartedAt, r.CompletedAt)
 	if err != nil {
 		log.Printf("[DB] persistRun error: %v", err)

@@ -38,6 +38,49 @@ import (
 	"vidhi-control/validator"
 )
 
+func resolveDatasetPath(stored string, ticks int64, preferFinal bool) string {
+	candidates := []string{}
+	fileName := strings.TrimSpace(stored)
+
+	defaultName := "public_99k.bin"
+	if preferFinal || ticks > 100000 {
+		defaultName = "eval_1m.bin"
+	}
+
+	if fileName != "" {
+		if strings.HasPrefix(fileName, "/") {
+			candidates = append(candidates, fileName)
+		}
+		candidates = append(candidates,
+			fileName,
+			fmt.Sprintf("/app/data/ticks/%s", fileName),
+			fmt.Sprintf("/app/data/ticks/%s", filepathBase(fileName)),
+		)
+	}
+
+	candidates = append(candidates,
+		fmt.Sprintf("/app/data/ticks/%s", defaultName),
+		defaultName,
+	)
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return fmt.Sprintf("/app/data/ticks/%s", defaultName)
+}
+
+func filepathBase(path string) string {
+	path = strings.ReplaceAll(path, "\\", "/")
+	parts := strings.Split(path, "/")
+	return parts[len(parts)-1]
+}
+
 var (
 	corePool     chan int
 	corePoolOnce sync.Once
@@ -69,6 +112,7 @@ type RunJob struct {
 	UserID     string `json:"user_id"`
 	SoPath     string `json:"so_path"`
 	RoundID    string `json:"round_id"`
+	BotConfig  string `json:"bot_config"` // Step 3: Custom bot config
 	Retries    int    `json:"retries"`
 	EnqueuedAt int64  `json:"enqueued_at"`
 }
@@ -214,28 +258,31 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	}
 
 	var ticksInt int64
-	var botConfig string
+	var roundBotConfig string
 	var datasetPath sql.NullString
 	var finalDatasetPath sql.NullString
 	if w.db != nil {
-		err := w.db.QueryRowContext(ctx, "SELECT tick_count, bot_config, dataset_path, final_dataset_path FROM rounds WHERE id=$1", job.RoundID).Scan(&ticksInt, &botConfig, &datasetPath, &finalDatasetPath)
+		err := w.db.QueryRowContext(ctx, "SELECT tick_count, bot_config, dataset_path, final_dataset_path FROM rounds WHERE id=$1", job.RoundID).Scan(&ticksInt, &roundBotConfig, &datasetPath, &finalDatasetPath)
 		if err != nil {
 			ticksInt = 100000
-			botConfig = "MM:1.0"
+			roundBotConfig = "MM:1.0"
 		}
 	} else {
 		ticksInt = 100000
-		botConfig = "MM:1.0"
+		roundBotConfig = "MM:1.0"
 	}
+
+	// Step 3: Use job.BotConfig if provided, otherwise fallback to round default
+	actualBotConfig := roundBotConfig
+	if job.BotConfig != "" {
+		actualBotConfig = job.BotConfig
+	}
+
 	ticks := fmt.Sprintf("%d", ticksInt)
 
-	actualDataset := "/app/data/ticks/public_99k.bin"
-	if strings.Contains(job.RunID, "run_final_") && finalDatasetPath.Valid && finalDatasetPath.String != "" {
-		actualDataset = finalDatasetPath.String
-	} else if datasetPath.Valid && datasetPath.String != "" {
-		actualDataset = datasetPath.String
-	} else if ticksInt > 100000 {
-		actualDataset = "/app/data/ticks/eval_1m.bin"
+	actualDataset := resolveDatasetPath(datasetPath.String, ticksInt, false)
+	if strings.Contains(job.RunID, "run_final_") {
+		actualDataset = resolveDatasetPath(finalDatasetPath.String, ticksInt, true)
 	}
 
 	// Acquire a core pair from the allocator pool
@@ -251,7 +298,7 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	cmd := exec.CommandContext(cmdCtx, w.gmBin,
 		"--external-sandbox",
 		"--ticks",  ticks,
-		"--bot-config", botConfig,
+		"--bot-config", actualBotConfig,
 		"--dataset", actualDataset,
 		"--run-id", job.RunID,
 		"--gm-core", fmt.Sprintf("%d", gmCore),
@@ -392,6 +439,7 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	if err != nil {
 		return fmt.Errorf("spawn sb: %v", err)
 	}
+	w.updateRunStatus(job.RunID, "running", nil)
 
 	// Wait for process to exit
 	err = cmd.Wait()

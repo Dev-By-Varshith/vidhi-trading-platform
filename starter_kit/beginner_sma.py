@@ -7,15 +7,15 @@ def on_tick(state: MarketState, orders: OrderProxy):
     """
     # Initialize our variables on the first tick
     if state.tick_count == 0:
-        state.sma_short = state.mid_price
-        state.sma_long = state.mid_price
+        state.ema_fast = state.mid_price
+        state.ema_slow = state.mid_price
         
     # Update Simple Moving Averages using Exponential weighting
-    state.sma_short = (state.sma_short * 0.95) + (state.mid_price * 0.05)
-    state.sma_long = (state.sma_long * 0.99) + (state.mid_price * 0.01)
+    state.ema_fast = (state.ema_fast * 0.95) + (state.mid_price * 0.05)
+    state.ema_slow = (state.ema_slow * 0.99) + (state.mid_price * 0.01)
     
     # Calculate the momentum signal
-    signal = state.sma_short - state.sma_long
+    signal = state.ema_fast - state.ema_slow
     
     # Trading Logic
     # Buy if short-term momentum is strongly positive and we haven't maxed our position

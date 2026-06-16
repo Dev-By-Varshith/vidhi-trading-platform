@@ -23,39 +23,82 @@ let ACTIVITIES_LOG_ROWS = [];
 // Falls back to JS GBM if the file isn't available.
 let DATASET_PRICES = null;  // Float64Array or null
 
-async function loadDataset(datasetKey) {
+const DATASET_MAGIC = 'VIDHI\x00\x00\x00';
+const TICK_RECORD_BYTES = 88;
+
+function normalizeDatasetFilename(datasetKey, maxTicks = 100000) {
   if (!datasetKey) {
-    DATASET_PRICES = null;
-    return;
+    return maxTicks > 100000 ? 'eval_1m.bin' : 'public_99k.bin';
   }
+  if (datasetKey.endsWith('.bin')) return datasetKey;
+  if (datasetKey.endsWith('.csv')) return datasetKey.replace(/\.csv$/i, '.bin');
+  return datasetKey;
+}
+
+function parseVidhiBinary(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const magic = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 8)));
+  if (magic !== DATASET_MAGIC) {
+    throw new Error('Invalid VIDHI dataset magic');
+  }
+
+  const tickCount = Number(view.getBigInt64(8, true));
+  const prices = new Float64Array(tickCount);
+  let offset = 16;
+
+  for (let i = 0; i < tickCount; i++) {
+    if (offset + TICK_RECORD_BYTES > arrayBuffer.byteLength) break;
+    prices[i] = view.getFloat64(offset + 24, true); // mid_price
+    offset += TICK_RECORD_BYTES;
+  }
+  return prices;
+}
+
+async function loadDatasetFromBackend(datasetKey) {
+  const fileName = normalizeDatasetFilename(datasetKey, MAX_TICKS);
+  const response = await fetch(`/api/datasets/${encodeURIComponent(fileName)}`);
+  if (!response.ok) {
+    throw new Error(`Backend dataset fetch failed (${response.status})`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  DATASET_PRICES = parseVidhiBinary(arrayBuffer);
+  console.log(`[WORKER] Loaded dataset from backend: ${fileName} (${DATASET_PRICES.length} ticks)`);
+}
+
+async function loadDataset(datasetKey) {
+  DATASET_PRICES = null;
+
   try {
-    const csvData = await getDataset(datasetKey);
-    if (!csvData) {
-      throw new Error("Dataset not found in IDB");
+    const csvData = datasetKey ? await getDataset(datasetKey) : null;
+    if (csvData) {
+      // Parse CSV: assuming one value per line, or standard format.
+      // Let's grab the first number found on each line (which would be fair_value)
+      const lines = csvData.trim().split('\n');
+      const prices = [];
+
+      let header = lines[0].toLowerCase().replace(/;/g, ',');
+      let cols = header.split(',');
+      let midIdx = cols.findIndex(c => c.includes('mid') || c.includes('fair') || c.includes('price'));
+      if (midIdx === -1) midIdx = cols.length > 2 ? 3 : 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const lineCols = lines[i].replace(/;/g, ',').split(',');
+        const val = parseFloat(lineCols[midIdx]);
+        if (!isNaN(val)) prices.push(val);
+      }
+
+      DATASET_PRICES = new Float64Array(prices);
+      console.log(`[WORKER] Loaded dataset from IDB: ${DATASET_PRICES.length} ticks`);
+      return;
     }
-    // Parse CSV: assuming one value per line, or standard format.
-    // Let's grab the first number found on each line (which would be fair_value)
-    // IMC datasets typically have multiple columns, e.g. "day;timestamp;product;bid_price_1;..."
-    // Since we just need `fair_value` (mid_price) for the simulation:
-    const lines = csvData.trim().split('\n');
-    const prices = [];
-    
-    // Quick heuristic: find column index of "mid_price" or "fair_value"
-    let header = lines[0].toLowerCase().replace(/;/g, ',');
-    let cols = header.split(',');
-    let midIdx = cols.findIndex(c => c.includes('mid') || c.includes('fair') || c.includes('price'));
-    if (midIdx === -1) midIdx = cols.length > 2 ? 3 : 0; // fallback guess
-    
-    for (let i = 1; i < lines.length; i++) {
-      const lineCols = lines[i].replace(/;/g, ',').split(',');
-      const val = parseFloat(lineCols[midIdx]);
-      if (!isNaN(val)) prices.push(val);
-    }
-    
-    DATASET_PRICES = new Float64Array(prices);
-    console.log(`[WORKER] Loaded dataset from IDB: ${DATASET_PRICES.length} ticks`);
   } catch (e) {
     console.warn('[WORKER] Failed to load dataset from IDB:', e.message);
+  }
+
+  try {
+    await loadDatasetFromBackend(datasetKey);
+  } catch (e) {
+    console.warn('[WORKER] Failed to load dataset from backend:', e.message);
     DATASET_PRICES = null;
   }
 }
@@ -691,6 +734,7 @@ let totalFills      = 0;
 // Telemetry history (for charts)
 const PNL_HISTORY     = [];
 const LATENCY_HISTORY = [];
+const VOLUME_HISTORY  = [];
 const BOT_ACTIVITY    = { MM: 0, MOM: 0, MR: 0, NOISE: 0, SNIPER: 0 };
 
 let contestantOrdersQueue = [];
@@ -720,6 +764,7 @@ function initSimulation(code, botConfig) {
   contestantOrdersQueue = [];
   PNL_HISTORY.length     = 0;
   LATENCY_HISTORY.length = 0;
+  VOLUME_HISTORY.length  = 0;
   Object.keys(BOT_ACTIVITY).forEach(k => BOT_ACTIVITY[k] = 0);
 
   // Init bots with aggressiveness from round config
@@ -865,8 +910,11 @@ function runBatch() {
     if (LATENCY_HISTORY.length > 500) LATENCY_HISTORY.shift();
 
     if (tickCount % 500 === 0) {
-      PNL_HISTORY.push({ tick: tickCount, pnl: parseFloat(pnl.toFixed(2)) });
+      PNL_HISTORY.push({ time: tickCount, value: parseFloat(pnl.toFixed(2)) });
       if (PNL_HISTORY.length > 200) PNL_HISTORY.shift();
+      
+      VOLUME_HISTORY.push({ time: tickCount, value: Math.abs(position) });
+      if (VOLUME_HISTORY.length > 200) VOLUME_HISTORY.shift();
     }
 
     tickCount++;
@@ -878,6 +926,12 @@ function runBatch() {
   const snap = lob.snapshot();
   const latencies = LATENCY_HISTORY.slice(-100);
   const sorted    = [...latencies].sort((a, b) => a - b);
+  
+  // Convert LATENCY_HISTORY to { time, value }
+  const latencyHistory = latencies.map((val, i) => ({ 
+    time: Math.max(0, tickCount - (latencies.length - i)), 
+    value: val 
+  }));
 
   self.postMessage({
     type: 'TICK_UPDATE',
@@ -901,8 +955,10 @@ function runBatch() {
       p50:         parseFloat((sorted[Math.floor(sorted.length * 0.50)] || 100).toFixed(1)),
       p90:         parseFloat((sorted[Math.floor(sorted.length * 0.90)] || 200).toFixed(1)),
       p99:         parseFloat((sorted[Math.floor(sorted.length * 0.99)] || 500).toFixed(1)),
-      // PnL history
+      // History arrays for charts
       pnlHistory:  PNL_HISTORY.slice(-100),
+      latencyHistory,
+      volumeHistory: VOLUME_HISTORY.slice(-100),
       // Bot activity
       botActivity: { ...BOT_ACTIVITY },
       // Batch perf
@@ -923,6 +979,12 @@ function buildFinalReport() {
   // Create a Blob to avoid passing a 10MB string directly in payload if possible, or just keep it as array
   // We will just pass the raw array and let the dashboard handle it to avoid large string allocations here.
   const activitiesLog = header + ACTIVITIES_LOG_ROWS.join('\n');
+  // Convert LATENCY_HISTORY to { time, value } for final report
+  const finalLatencyHistory = LATENCY_HISTORY.map((val, i) => ({ 
+    time: Math.max(0, tickCount - (LATENCY_HISTORY.length - i)), 
+    value: val 
+  }));
+  
   return {
     totalTicks:  tickCount,
     finalPnl:    parseFloat(pnl.toFixed(2)),
@@ -933,6 +995,8 @@ function buildFinalReport() {
     p90: latencies[Math.floor(latencies.length * 0.90)] || 0,
     p99: latencies[Math.floor(latencies.length * 0.99)] || 0,
     pnlHistory: PNL_HISTORY,
+    latencyHistory: finalLatencyHistory,
+    volumeHistory: VOLUME_HISTORY,
     botActivity: { ...BOT_ACTIVITY },
     lastPrice: snap.lastTradePrice,
     activitiesLog

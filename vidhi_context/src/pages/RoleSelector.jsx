@@ -142,8 +142,17 @@ export default function RoleSelector() {
                   />
                 </div>
               </div>
-              <button type="submit" className="btn-primary" style={{ marginTop: '1rem', width: '100%', padding: '12px' }} disabled={loading}>
-                {loading ? 'INITIALIZING...' : 'CONNECT TO GRID'} <ChevronRight size={16} />
+              <button type="submit" className="btn-primary btn-connect" style={{ marginTop: '1rem', width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} disabled={loading}>
+                {loading ? 'INITIALIZING...' : (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="connect-text">CONNECT TO GRID</span> 
+                    <div style={{ display: 'flex' }} className="arrows">
+                      <ChevronRight size={16} className="arrow-icon a1" />
+                      <ChevronRight size={16} className="arrow-icon a2" style={{ marginLeft: '-8px' }} />
+                      <ChevronRight size={16} className="arrow-icon a3" style={{ marginLeft: '-8px' }} />
+                    </div>
+                  </span>
+                )}
               </button>
             </form>
           ) : (
@@ -168,6 +177,9 @@ export default function RoleSelector() {
                   />
                   {passError && <span style={{ color: '#e11d48', fontSize: '0.75rem', position: 'absolute', right: '12px', top: '14px' }}>ACCESS DENIED</span>}
                 </div>
+                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0, 198, 255, 0.08)', border: '1px solid rgba(0, 198, 255, 0.2)', borderRadius: '4px', color: 'var(--text-muted)', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                  Hint: Admin passcode is vidhi-admin
+                </div>
               </div>
               <button type="submit" className="btn-primary" style={{ marginTop: '1rem', width: '100%', padding: '12px' }}>
                 AUTHORIZE <ChevronRight size={16} />
@@ -177,6 +189,31 @@ export default function RoleSelector() {
 
         </div>
       </div>
+      {/* CSS Animations */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes arrowFlow {
+          0% { opacity: 0.2; transform: translateX(-2px); }
+          50% { opacity: 1; transform: translateX(0); }
+          100% { opacity: 0.2; transform: translateX(2px); }
+        }
+        .btn-connect:hover .a1 { animation: arrowFlow 0.8s infinite 0s; color: var(--brand-cyan); }
+        .btn-connect:hover .a2 { animation: arrowFlow 0.8s infinite 0.15s; color: var(--brand-cyan); }
+        .btn-connect:hover .a3 { animation: arrowFlow 0.8s infinite 0.3s; color: var(--brand-cyan); }
+        
+        @keyframes textGlowSlide {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        .btn-connect:hover .connect-text {
+          background: linear-gradient(90deg, #fff 0%, var(--brand-cyan) 50%, #fff 100%);
+          background-size: 200% auto;
+          color: transparent;
+          -webkit-background-clip: text;
+          animation: textGlowSlide 1.5s linear infinite;
+        }
+        .arrow-icon { transition: all 0.2s; }
+        .btn-connect .arrows { margin-left: 4px; }
+      `}} />
     </div>
   );
 }

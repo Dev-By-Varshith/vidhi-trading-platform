@@ -11,6 +11,29 @@
 import { submitCode, pollRunUntilDone, connectTelemetryWS, checkBackendHealth } from '../api/client.js';
 import ContestStore from '../store/ContestStore.js';
 
+const BACKEND_ALLOWED_STATE_FIELDS = new Set([
+  'bid_price',
+  'ask_price',
+  'mid_price',
+  'spread',
+  'last_trade_price',
+  'last_trade_volume',
+  'underlying_signal',
+  'volatility',
+  'bid_depth',
+  'ask_depth',
+  'position',
+  'cash',
+  'pnl',
+  'fill_count',
+  'fills',
+  'ema_fast',
+  'ema_slow',
+  'tick_count',
+  'my_position',
+  's0', 's1', 's2', 's3', 's4', 's5', 's6', 's7',
+]);
+
 class VidhiEngine {
   constructor() {
     if (VidhiEngine.instance) return VidhiEngine.instance;
@@ -28,9 +51,26 @@ class VidhiEngine {
     this.currentRunId = null;
     this.currentCode  = null;
     this._wsHandle = null;
+    this.logHistory = [];
+
+    this._resetDecimation();
+
+    // High-velocity telemetry throttling (Step 4)
+    this._telemetryBuffer = null;
+    this._telemetryThrottleTimer = null;
 
     // Check backend on boot (non-blocking)
     this._detectBackend();
+  }
+
+  _resetDecimation() {
+    this._decimation = {
+      pnl: [],
+      latency: [],
+      volume: [],
+      bucketTickCount: 1, // Will be set to maxTicks / 1000
+      currentBucket: { count: 0, pnl: 0, lat: 0, vol: 0, tick: 0 }
+    };
   }
 
   // ── Backend detection ─────────────────────────────────────────────────────
@@ -82,9 +122,11 @@ class VidhiEngine {
   }
 
   _handleWSMessage(msg) {
+    console.log('[WS] Message:', msg);
     if (msg.type === 'RUN_UPDATE' && msg.payload) {
       if (this.currentRunId && msg.payload.run_id !== this.currentRunId) return; // filter crosstalk
       const run = msg.payload;
+      this._setStatus(run.status); // Update engine status whenever backend status changes
       // Map backend field names → VidhiEngine state format
       const mapped = {
         runId:      run.run_id,
@@ -96,6 +138,8 @@ class VidhiEngine {
         totalFills: run.total_fills ?? 0,
         totalTicks: run.total_ticks ?? 0,
         tlCount:    run.tle_count   ?? 0,
+        oom:        run.oom         ?? false,
+        violations: run.violations  ?? 0,
         correctness: run.correctness ?? 1.0,
         code:       this.currentCode,
       };
@@ -105,7 +149,28 @@ class VidhiEngine {
         this._setStatus(run.status === 'complete' ? 'done' : 'error');
         this.lastState = { ...this.lastState, ...mapped, done: true };
         this.completeSubscribers.forEach(cb => cb(mapped));
-        this._log(`[GM] Run complete — PnL=${mapped.pnlPct?.toFixed(4)}% p99=${mapped.p99?.toFixed(0)}ns correctness=${mapped.correctness?.toFixed(3)}`);
+        if (run.status === 'complete') {
+          this._log(`[GM] Run complete — PnL=${mapped.pnlPct?.toFixed(4)}% p99=${mapped.p99?.toFixed(0)}ns correctness=${mapped.correctness?.toFixed(3)}`);
+        } else if (run.status === 'tle') {
+          this._log('[ERROR] Run hit the time limit before producing a valid result.');
+        } else {
+          this._log('[ERROR] Run failed before simulation output was produced.');
+        }
+
+        // Update local leaderboard and history
+        const roundId = ContestStore.getActiveRoundId() || 'round1';
+        const contestId = ContestStore.state.activeContestId;
+        
+        if (run.status === 'complete') {
+          ContestStore.recordResult({
+            contestId,
+            roundId,
+            pnlPct: mapped.pnlPct,
+            p99: mapped.p99,
+            fills: mapped.totalFills,
+            pnlHistory: this._decimation.pnl
+          });
+        }
 
         ContestStore.addRunHistory({
           id: mapped.runId,
@@ -118,7 +183,8 @@ class VidhiEngine {
           fills: mapped.totalFills,
           ticks: mapped.totalTicks,
           correctness: mapped.correctness,
-          history: this.lastState?.pnlHistory || [],
+          violations: mapped.violations,
+          history: this._decimation.pnl,
           botActivity: this.lastState?.botActivity || {},
           code: mapped.code
         });
@@ -131,51 +197,89 @@ class VidhiEngine {
       }
     } else if (msg.type === 'TICK_TELEMETRY' && msg.payload && this.isSimulating) {
         if (this.currentRunId && msg.run_id !== this.currentRunId) return; // filter crosstalk
-        // Live tick stream from running GM binary (all LOB fields now included — P2-4)
-        const t = msg.payload;
-        const prev = this.lastState || {};
-        const mappedTick = {
-            ...prev,
-            tick:       t.tick_id   ?? prev.tick    ?? 0,
-            tickId:     t.tick_id,
-            pnl:        t.pnl       ?? prev.pnl     ?? 0,
-            pnlPct:     ((t.pnl ?? 0) / 100000) * 100,   // $100k starting capital
-            position:   t.pos       ?? prev.position ?? 0,
-            p50:        t.p50_ns    ?? prev.p50     ?? 0,
-            p99:        t.p99_ns    ?? prev.p99     ?? 0,
-            // LOB market data (live from GM telemetry)
-            bidPrice:   t.bid_price  ?? prev.bidPrice  ?? 0,
-            askPrice:   t.ask_price  ?? prev.askPrice  ?? 0,
-            spread:     t.spread     ?? prev.spread    ?? 0,
-            lastTrade:  t.last_trade ?? prev.lastTrade ?? 0,
-            fillCount:  t.fill_count ?? 0,
-            // Synthesize 5-level LOB depth from best bid/ask for the depth bar chart
-            bidDepth: t.bid_price ? [
-              { price: t.bid_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 30) },
-              { price: t.bid_price - 0.01, volume: 80  },
-              { price: t.bid_price - 0.02, volume: 120 },
-              { price: t.bid_price - 0.03, volume: 200 },
-              { price: t.bid_price - 0.04, volume: 320 },
-            ] : (prev.bidDepth ?? []),
-            askDepth: t.ask_price ? [
-              { price: t.ask_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 25) },
-              { price: t.ask_price + 0.01, volume: 80  },
-              { price: t.ask_price + 0.02, volume: 120 },
-              { price: t.ask_price + 0.03, volume: 200 },
-              { price: t.ask_price + 0.04, volume: 320 },
-            ] : (prev.askDepth ?? []),
-        };
-        // PnL history ring for sparkline (300 data points)
-        mappedTick.pnlHistory = [...(prev.pnlHistory ?? []), t.pnl ?? 0];
-        if (mappedTick.pnlHistory.length > 300) mappedTick.pnlHistory.shift();
-        // Progress bar from tick count
-        const maxTicks = prev.maxTicks ?? 100_000;
-        mappedTick.maxTicks = maxTicks;
-        mappedTick.progress = Math.min((t.tick_id ?? 0) / maxTicks, 1);
+        
+        // Step 4: High-velocity throttling
+        // Store the latest tick in the buffer
+        this._telemetryBuffer = msg.payload;
 
-        this.lastState = mappedTick;
-        this.subscribers.forEach(cb => cb(mappedTick));
+        if (!this._telemetryThrottleTimer) {
+          // Process at ~16ms (60fps) or ~33ms (30fps) to keep UI smooth
+          this._telemetryThrottleTimer = setTimeout(() => {
+            if (this._telemetryBuffer) {
+              this._processTick(this._telemetryBuffer);
+              this._telemetryBuffer = null;
+            }
+            this._telemetryThrottleTimer = null;
+          }, 33); // 30fps is plenty for trading visuals
+        }
     }
+  }
+
+  _processTick(t) {
+    const prev = this.lastState || {};
+    const tickFills = t.fill_count ?? 0;
+    const mappedTick = {
+        ...prev,
+        tick:       t.tick_id   ?? prev.tick    ?? 0,
+        tickId:     t.tick_id,
+        pnl:        t.pnl       ?? prev.pnl     ?? 0,
+        pnlPct:     ((t.pnl ?? 0) / 100000) * 100,   // $100k starting capital
+        position:   t.pos       ?? prev.position ?? 0,
+        p50:        t.p50_ns    ?? prev.p50     ?? 0,
+        p99:        t.p99_ns    ?? prev.p99     ?? 0,
+        // LOB market data
+        bidPrice:   t.bid_price  ?? prev.bidPrice  ?? 0,
+        askPrice:   t.ask_price  ?? prev.askPrice  ?? 0,
+        spread:     t.spread     ?? prev.spread    ?? 0,
+        lastTrade:  t.last_trade ?? prev.lastTrade ?? 0,
+        fillCount:  tickFills,
+        totalFills: (prev.totalFills ?? 0) + tickFills,
+        // Depth is derived from the best bid/ask provided by the engine.
+        // In a real HFT environment, depth is often sparse, so we synthesize 
+        // a tight book around the best prices.
+        bidDepth: t.bid_price ? [
+          { price: t.bid_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 30) },
+          { price: t.bid_price - 0.01, volume: 80  + (t.tick_id % 20) },
+          { price: t.bid_price - 0.02, volume: 120 + (t.tick_id % 40) },
+          { price: t.bid_price - 0.03, volume: 200 + (t.tick_id % 60) },
+          { price: t.bid_price - 0.04, volume: 320 + (t.tick_id % 80) },
+        ] : (prev.bidDepth ?? []),
+        askDepth: t.ask_price ? [
+          { price: t.ask_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 25) },
+          { price: t.ask_price + 0.01, volume: 80  + (t.tick_id % 15) },
+          { price: t.ask_price + 0.02, volume: 120 + (t.tick_id % 35) },
+          { price: t.ask_price + 0.03, volume: 200 + (t.tick_id % 55) },
+          { price: t.ask_price + 0.04, volume: 320 + (t.tick_id % 75) },
+        ] : (prev.askDepth ?? []),
+        botActivity: t.bot_activity || (Object.keys(prev.botActivity || {}).length > 0 ? prev.botActivity : {
+          BOT_MARKET_MAKER: Math.floor(Math.random() * 50 + Math.abs(t.pos || 0) * 0.4),
+          BOT_MOMENTUM: Math.floor(Math.random() * 30 + Math.abs(t.pos || 0) * 0.25),
+          BOT_MEAN_REVERSION: Math.floor(Math.random() * 20 + Math.abs(t.pos || 0) * 0.2),
+          BOT_NOISE: Math.floor(Math.random() * 10 + Math.abs(t.pos || 0) * 0.1),
+          BOT_SNIPER: Math.floor(Math.random() * 5 + Math.abs(t.pos || 0) * 0.05),
+        }),
+    };
+    
+    const maxTicks = prev.maxTicks ?? 100_000;
+    mappedTick.maxTicks = maxTicks;
+    mappedTick.progress = Math.min((t.tick_id ?? 0) / maxTicks, 1);
+
+    // Step 5: Rolling Ring Buffers (Max 1,000 points)
+    const timeVal = t.tick_id || 0;
+    this._decimation.pnl.push({ time: timeVal, value: t.pnl ?? 0 });
+    this._decimation.latency.push({ time: timeVal, value: t.p50_ns ?? 0 });
+    this._decimation.volume.push({ time: timeVal, value: Math.abs(t.pos ?? 0) });
+
+    if (this._decimation.pnl.length > 1000) this._decimation.pnl.shift();
+    if (this._decimation.latency.length > 1000) this._decimation.latency.shift();
+    if (this._decimation.volume.length > 1000) this._decimation.volume.shift();
+
+    mappedTick.pnlHistory = [...this._decimation.pnl];
+    mappedTick.latencyHistory = [...this._decimation.latency];
+    mappedTick.volumeHistory = [...this._decimation.volume];
+
+    this.lastState = mappedTick;
+    this.subscribers.forEach(cb => cb(mappedTick));
   }
 
   // ── Worker message handler (local mode) ────────────────────────────────────
@@ -255,20 +359,40 @@ class VidhiEngine {
   }
 
   async startSimulation(code, options = {}) {
+    // If we're currently in local fallback mode, check if the backend came back online
+    if (this.mode === 'local') {
+      await this._detectBackend();
+    }
+
     this.isSimulating = true;
-    this._setStatus('compiling');
+    this._setStatus('queued');
     this.lastState = null;
     this.currentCode = code;
+    this._resetDecimation();
+    this.logHistory = [];
 
+    // Force mode based on isFinal flag
     if (this.mode === 'backend') {
-      await this._startBackendRun(code, options);
+      await this._startBackendRun(code, { ...options, isPractice: !options.isFinal });
     } else {
-      this._startLocalRun(code, options);
+      if (options.isFinal) {
+        this._setStatus('error');
+        this._log('[ERROR] Backend unreachable for Final Submission. Please check connectivity.');
+        this.isSimulating = false;
+      } else {
+        this._startLocalRun(code, options);
+      }
     }
   }
 
   // Backend path: POST /api/submit → poll until done
   async _startBackendRun(code, options = {}) {
+    const validationError = this._validateBackendPython(code);
+    if (validationError) {
+      this._failBeforeRun(validationError);
+      return;
+    }
+
     this._log('[FORGE] Submitting to backend forge pipeline...');
     try {
       const storeState = ContestStore.state;
@@ -277,14 +401,38 @@ class VidhiEngine {
         : 'anonymous');
       
       const roundId = ContestStore.getActiveRoundId() || 'round1';
+      
+      // Step 3: Fetch bot config from active round
+      const activeContest = ContestStore.getActiveContest();
+      const activeRound = activeContest?.rounds?.find(r => r.id === roundId);
+      const botConfig = activeRound?.activeBots ? activeRound.activeBots.map(b => `${b}:${activeRound.botAggressiveness || 0.5}`).join(',') : '';
 
-      const { run_id } = await submitCode(code, userId, roundId);
+      // Ensure API key is provisioned before submitting
+      const { autoProvisionApiKey } = await import('../api/client');
+      await autoProvisionApiKey(userId);
+
+      let run_id;
+      try {
+        const result = await submitCode(code, userId, roundId, options.isPractice, botConfig);
+        run_id = result.run_id;
+      } catch (e) {
+        if (e.message.includes('401') || e.message.includes('invalid or expired')) {
+          this._log('[AUTH] API key expired, provisioning new one and retrying...');
+          await autoProvisionApiKey(userId);
+          const retryResult = await submitCode(code, userId, roundId, options.isPractice, botConfig);
+          run_id = retryResult.run_id;
+        } else {
+          throw e;
+        }
+      }
+
       this.currentRunId = run_id;
       this._log(`[FORGE] Run ID: ${run_id} — pipeline started`);
       this._log('[FORGE] AST scan → transpile → Numba AOT → Game Master...');
-      this._setStatus('running');
+      // Do NOT set to 'running' yet — let backend status updates (WS) drive the status!
 
       // Kick off polling in background (WS handles final result, but poll as fallback)
+      const maxTicks = options.maxTicks || 1_000_000;
       pollRunUntilDone(run_id, (run) => {
         const msg = `[POLL] ${run.status} — tick ${(run.total_ticks || 0).toLocaleString()}`;
         this._log(msg);
@@ -294,29 +442,85 @@ class VidhiEngine {
           this.lastState = {
             ...(this.lastState || {}),
             tick:      run.total_ticks ?? 0,
-            maxTicks:  1_000_000,
-            progress:  (run.total_ticks ?? 0) / 1_000_000,
+            maxTicks:  maxTicks,
+            progress:  (run.total_ticks ?? 0) / maxTicks,
             pnl:       run.pnl     ?? 0,
             pnlPct:    run.pnl_pct ?? 0,
           };
           this.subscribers.forEach(cb => cb(this.lastState));
+        }
+
+        if (run.status === 'error' || run.status === 'tle') {
+          const errorMessage = run.status === 'tle'
+            ? 'Submission timed out during backend execution.'
+            : 'Submission failed in the Forge pipeline before live simulation ticks started.';
+          this.isSimulating = false;
+          this._setStatus('error');
+          this.lastState = {
+            ...(this.lastState || {}),
+            runId: run.run_id,
+            status: run.status,
+            errorMessage,
+            tlCount: run.tle_count ?? 0,
+            done: true,
+            code: this.currentCode,
+          };
+          this.completeSubscribers.forEach(cb => cb(this.lastState));
         }
       }).catch(e => this._log('[POLL] ' + e.message));
 
     } catch (e) {
       this._setStatus('error');
       this._log('[ERROR] Backend submit failed: ' + e.message);
-      this._log('[FALLBACK] Switching to local simulation...');
-      this.mode = 'local';
-      this._startLocalRun(code);
+      this.isSimulating = false;
     }
+  }
+
+  _validateBackendPython(code) {
+    const matches = [...code.matchAll(/\bstate\.([A-Za-z_][A-Za-z0-9_]*)\b/g)];
+    const unsupported = [...new Set(
+      matches
+        .map(([, field]) => field)
+        .filter(field => !BACKEND_ALLOWED_STATE_FIELDS.has(field))
+    )];
+
+    if (unsupported.length === 0) return null;
+
+    return `Unsupported backend state field(s): ${unsupported.join(', ')}. Use SDK fields like state.position, state.tick_count, state.ema_fast / state.ema_slow, or custom slots state.s0..state.s7.`;
+  }
+
+  _failBeforeRun(errorMessage) {
+    this.isSimulating = false;
+    this._setStatus('error');
+    this.lastState = {
+      status: 'error',
+      errorMessage,
+      done: true,
+      code: this.currentCode,
+    };
+    this._log('[ERROR] ' + errorMessage);
+    this.completeSubscribers.forEach(cb => cb(this.lastState));
+    this.subscribers.forEach(cb => cb(this.lastState));
   }
 
   // Local path: Web Worker
   _startLocalRun(code, options = {}) {
     this._log('[LOCAL] Starting Web Worker simulation...');
+    const activeContest = ContestStore.getActiveContest();
+    const activeRoundId = ContestStore.getActiveRoundId();
+    const activeRound = activeContest?.rounds?.find(r => r.id === activeRoundId) || activeContest?.rounds?.[0] || null;
+    const datasetKey = options.isFinal
+      ? (activeRound?.finalDataKey || activeRound?.final_dataset_path || 'eval_1m.bin')
+      : (activeRound?.testDataKey || activeRound?.dataset_path || 'public_99k.bin');
+    const botConfig = activeRound?.activeBots
+      ? activeRound.activeBots.map(b => `${b}:${activeRound.botAggressiveness || 0.5}`).join(',')
+      : 'MM:0.5,NOISE:0.5';
+
     this._initWorker();
-    this.worker.postMessage({ type: 'START_SIMULATION', payload: { code, ...options } });
+    this.worker.postMessage({
+      type: 'START_SIMULATION',
+      payload: { code, datasetKey, botConfig, ...options }
+    });
   }
 
   stopSimulation() {
@@ -337,6 +541,7 @@ class VidhiEngine {
 
   onStatus(cb) {
     this.statusSubscribers.add(cb);
+    cb(this.status);
     return () => this.statusSubscribers.delete(cb);
   }
 
@@ -347,16 +552,21 @@ class VidhiEngine {
 
   getStatus()    { return this.status; }
   getLastState() { return this.lastState; }
+  getLogHistory() { return [...this.logHistory]; }
   getMode()      { return this.mode; }
   getCurrentRunId() { return this.currentRunId; }
 
   // ── Internals ─────────────────────────────────────────────────────────────
   _setStatus(s) {
     this.status = s;
-    this.statusSubscribers.forEach(cb => cb(s));
+    // Notify subscribers with both status and the latest log message
+    const lastLog = this.logHistory[this.logHistory.length - 1] || '';
+    this.statusSubscribers.forEach(cb => cb(s, lastLog));
   }
 
   _log(msg) {
+    this.logHistory.push(msg);
+    if (this.logHistory.length > 50) this.logHistory.shift();
     this.statusSubscribers.forEach(cb => cb(this.status, msg));
     console.log(msg);
   }

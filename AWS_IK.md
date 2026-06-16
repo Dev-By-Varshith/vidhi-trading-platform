@@ -12,7 +12,7 @@ Hosting the website:
 
 S3 — stores your built React frontend files (HTML, JS, CSS)
 CloudFront — global CDN that serves your website fast from everywhere, handles HTTPS
-Route 53 — maps your domain name (like arena.vidhi.com) to CloudFront
+Route 53 — maps your like arena.vidhi.com to CloudFront
 
 Running your backend:
 

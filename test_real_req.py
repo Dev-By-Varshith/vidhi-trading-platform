@@ -1,0 +1,1 @@
+import requests; res = requests.post("http://localhost:8080/api/submit", headers={"X-API-Key": "admin-key"}, files={"code": ("bot.py", open("starter_kit/custom_bot_1_buyer.py", "rb"))}); print(res.status_code, res.text)

@@ -1,0 +1,9 @@
+{
+  "name": "docx-generator",
+  "version": "1.0.0",
+  "description": "Generator for architecture doc",
+  "main": "main.js",
+  "dependencies": {
+    "docx": "^8.2.0"
+  }
+}

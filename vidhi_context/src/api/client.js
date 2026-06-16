@@ -78,12 +78,14 @@ export async function checkBackendHealth() {
 
 // ─── Submit code for forge pipeline + GM execution ────────────────────────────
 // Returns { run_id, status, message }
-export async function submitCode(code, userId = 'anonymous', roundId = 'round1') {
+export async function submitCode(code, userId = 'anonymous', roundId = 'round1', isPractice = false, botConfig = '') {
   const form = new FormData();
   const blob = new Blob([code], { type: 'text/x-python' });
   form.append('code',    blob, 'trader.py');
   form.append('user_id', userId);
   form.append('round_id', roundId);
+  form.append('bot_config', botConfig); // Step 3: Send bot string config
+  if (isPractice) form.append('is_practice', 'true');
 
   const key = getApiKey();
   const res = await fetch(BASE + '/submit', {
@@ -94,6 +96,9 @@ export async function submitCode(code, userId = 'anonymous', roundId = 'round1')
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401 || err.error?.includes('invalid or expired')) {
+      setApiKey(null); // Clear the broken/expired key so auto-provision runs next time
+    }
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
@@ -121,7 +126,7 @@ export async function pollRunUntilDone(runId, onProgress, intervalMs = 2000) {
 
 export async function downloadRunLog(runId) {
   const key = getApiKey();
-  const res = await fetch(BASE + `/runs/${runId}/log`, {
+  const res = await fetch(BASE + `/runs/${runId}/execution-log`, {
     headers: key ? { 'X-API-Key': key } : {},
   });
   if (!res.ok) {
@@ -134,6 +139,27 @@ export async function downloadRunLog(runId) {
   const a = document.createElement('a');
   a.href = url;
   a.download = `${runId}.log`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadRunCode(runId) {
+  const key = getApiKey();
+  const res = await fetch(BASE + `/runs/${runId}/code`, {
+    headers: key ? { 'X-API-Key': key } : {},
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${runId}.py`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -161,9 +187,12 @@ export async function fetchLeaderboard() {
 // ─── WebSocket telemetry connection ───────────────────────────────────────────
 // Returns a { close() } handle. onMessage called with parsed JSON.
 export function connectTelemetryWS(onMessage, onConnect, onDisconnect) {
-  const WS_URL = location.protocol === 'https:'
-    ? 'wss://' + location.host + '/ws/telemetry'
-    : 'ws://'  + location.host + '/ws/telemetry';
+  // Use the same base URL for WebSocket as for REST
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  const url = new URL(apiBase);
+  const WS_URL = url.protocol === 'https:'
+    ? 'wss://' + url.host + '/ws/telemetry'
+    : 'ws://'  + url.host + '/ws/telemetry';
 
   let ws      = null;
   let closed  = false;

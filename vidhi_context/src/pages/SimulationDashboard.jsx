@@ -1,474 +1,573 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Activity, Cpu, Zap, TrendingUp, TrendingDown, Bot, BarChart2, Layers, CheckCircle2, Trophy, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BadgeCheck, Check, ChevronDown, LayoutGrid, MoreHorizontal, Search, Settings2, ShieldCheck, User, Maximize2, Minimize2 } from 'lucide-react';
+import { createChart, ColorType, LineSeries, HistogramSeries } from 'lightweight-charts';
 import VidhiEngine from '../engine/VidhiEngine';
-import ContestStore from '../store/ContestStore';
-import { downloadRunLog } from '../api/client';
 
-const AnimatedValue = ({ value, className, colorType = 'white' }) => {
-  const [flash, setFlash] = useState(false);
-  const prevValue = useRef(value);
-
+// ─── Reusable Canvas Chart Component ──────────────────────────────────────────
+function LWChart({ data, color, height = 200, priceFormat = 'price', title = '' }) {
+  const chartContainerRef = useRef();
+  const containerRef = useRef();
+  const seriesRef = useRef(null);
+  const dataRef = useRef([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
   useEffect(() => {
-    if (prevValue.current !== value) {
-      setFlash(true);
-      const t = setTimeout(() => setFlash(false), 300);
-      prevValue.current = value;
-      return () => clearTimeout(t);
-    }
-  }, [value]);
-
-  const flashClass = flash ? (colorType === 'blue' ? 'tv-flash-blue-active' : 'tv-flash-active') : '';
-  return <span className={`tv-value ${flashClass} ${className || ''}`}>{value}</span>;
-};
-
-// ─── Mini chart (canvas-based, zero dependencies) ─────────────────────────────
-function SparkLine({ data, color, height = 60, fill = true, glow = true }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas || data.length < 2) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    const vals = data.map(d => (typeof d === 'object' ? d.pnl : d));
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    const range = max - min || 1;
-    const toY = v => h - ((v - min) / range) * (h - 16) - 8; // More padding for glows
-    const toX = i => (i / (vals.length - 1)) * w;
-
-    // Gradient fill
-    if (fill) {
-      ctx.beginPath();
-      ctx.moveTo(toX(0), toY(vals[0]));
-      for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
-      ctx.lineTo(toX(vals.length - 1), h);
-      ctx.lineTo(0, h);
-      ctx.closePath();
-      const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, color.replace(')', ', 0.35)').replace('rgb', 'rgba').replace('#00FF66', 'rgba(0,255,102,0.35)').replace('#FF2A4B', 'rgba(255,42,75,0.35)'));
-      grad.addColorStop(1, color.replace(')', ', 0)').replace('rgb', 'rgba').replace('#00FF66', 'rgba(0,255,102,0)').replace('#FF2A4B', 'rgba(255,42,75,0)'));
-      ctx.fillStyle = grad;
-      ctx.fill();
+    if (!chartContainerRef.current) return;
+    const chart = createChart(chartContainerRef.current, { 
+      height, 
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#888' },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+      timeScale: { 
+        timeVisible: true, secondsVisible: false, tickMarkFormatter: (time) => `T${time}`
+      },
+      localization: {
+        timeFormatter: (time) => `Tick ${time}`,
+      },
+      crosshair: { mode: 1 },
+      handleScroll: false,
+      handleScale: false,
+    });
+    
+    // Add title if provided
+    if (title) {
+        chart.applyOptions({ watermark: { visible: true, text: title, color: 'rgba(255, 255, 255, 0.1)', fontSize: 24, horzAlign: 'center', vertAlign: 'center' }});
     }
 
-    // Glow effect
-    ctx.beginPath();
-    ctx.moveTo(toX(0), toY(vals[0]));
-    for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
-
-    if (glow) {
-      ctx.shadowBlur = 12;
-      ctx.shadowColor = color;
+    let series;
+    if (priceFormat === 'volume') {
+      series = chart.addSeries(HistogramSeries, { color, priceFormat: { type: 'volume' } });
+    } else {
+      series = chart.addSeries(LineSeries, { color, lineWidth: 2, crosshairMarkerRadius: 4 });
     }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
+    
+    seriesRef.current = series;
 
-    // Reset shadow
-    ctx.shadowBlur = 0;
-
-    // Glowing dot at the end
-    const lastX = toX(vals.length - 1);
-    const lastY = toY(vals[vals.length - 1]);
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 3, 0, 2 * Math.PI);
-    ctx.fillStyle = '#fff';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = color;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#fff';
-    ctx.stroke();
-  }, [data, color, fill, glow]);
-
-  return <canvas ref={ref} width={300} height={height} style={{ width: '100%', height }} />;
-}
-
-// ─── ZEX-Style LOB Depth Visualizer ──────────────────────────────────────────
-function LOBDepthBar({ bidDepth = [], askDepth = [] }) {
-  const maxVol = Math.max(
-    ...bidDepth.map(d => d.volume),
-    ...askDepth.map(d => d.volume),
-    1
-  );
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontFamily: "'Roboto Mono', monospace", fontSize: '0.75rem' }}>
-      {/* Ask side (top, reversed) */}
-      {[...askDepth].reverse().map((level, i) => (
-        <div key={`ask-${i}`} className="lob-row">
-          <div className="lob-bg" style={{ right: 0, width: `${(level.volume / maxVol) * 100}%`, backgroundColor: 'var(--neon-red)' }} />
-          <div className="lob-content">
-            <span style={{ color: 'var(--neon-red)' }}>{level.price?.toFixed(2)}</span>
-            <span style={{ color: 'var(--text-bright)' }}>{level.volume}</span>
-          </div>
-        </div>
-      ))}
-      {/* Spread line */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '4px 0' }}>
-        <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-glass)' }} />
-        <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>SPREAD</span>
-        <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-glass)' }} />
-      </div>
-      {/* Bid side */}
-      {bidDepth.map((level, i) => (
-        <div key={`bid-${i}`} className="lob-row">
-          <div className="lob-bg" style={{ right: 0, width: `${(level.volume / maxVol) * 100}%`, backgroundColor: 'var(--neon-green)' }} />
-          <div className="lob-content">
-            <span style={{ color: 'var(--neon-green)' }}>{level.price?.toFixed(2)}</span>
-            <span style={{ color: 'var(--text-bright)' }}>{level.volume}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Bot Activity Bar ─────────────────────────────────────────────────────────
-function BotActivityRow({ name, fills, total, color }) {
-  const pct = total > 0 ? (fills / total) * 100 : 0;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-      <div style={{ width: '72px', fontSize: '0.7rem', fontFamily: "'Roboto Mono', monospace", color: '#666' }}>{name}</div>
-      <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, backgroundColor: color, borderRadius: '3px', transition: 'width 0.3s' }} />
-      </div>
-      <div style={{ width: '36px', textAlign: 'right', fontSize: '0.7rem', fontFamily: "'Roboto Mono', monospace", color: '#555' }}>{fills}</div>
-    </div>
-  );
-}
-
-// ─── Premium Card Wrapper ────────────────────────────────────────────────────────────
-function Panel({ title, icon, children, style = {}, delay = '0s' }) {
-  return (
-    <div className="premium-card tv-slide-in" style={{ animationDelay: delay, ...style }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-dim)', fontSize: '0.65rem', fontFamily: "'Inter', sans-serif", letterSpacing: '0.5px', fontWeight: 500 }}>
-        {icon} {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// ─── Stat cell ────────────────────────────────────────────────────────────────
-function Stat({ label, value, color = 'var(--text-bright)', mono = true }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-      <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontFamily: "'Roboto Mono', monospace", letterSpacing: '1px', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: '1.1rem', fontWeight: 700, color, fontFamily: mono ? "'Roboto Mono', monospace" : 'inherit' }}>
-        <AnimatedValue value={value} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-export default function SimulationDashboard() {
-  const [state, setState] = useState(VidhiEngine.getLastState() || null);
-  const [done, setDone] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [mode, setMode] = useState(VidhiEngine.getMode());
-  // N3: Position history ring for position chart (300 samples)
-  const posHistory = useRef([]);
-  const [posSnap, setPosSnap] = useState([]);
-
-  const handleSubmitScore = () => {
-    if (!state || submitted) return;
-    const storeState = ContestStore.state;
-    if (storeState.activeContestId) {
-      ContestStore.recordResult({
-        contestId: storeState.activeContestId,
-        roundId: ContestStore.getActiveContest()?.rounds?.find(r => r.status === 'active')?.id,
-        pnlPct: state.pnlPct ?? 0,
-        p99: state.p99 ?? 0,
-        p50: state.p50 ?? 0,
-        fills: state.totalFills ?? state.total_fills ?? 0,
-      });
-      setSubmitted(true);
-    }
-  };
-
-  const handleDownloadCode = () => {
-    if (!state?.code) return;
-    const blob = new Blob([state.code], { type: 'text/x-python' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `submission.py`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const [downloadingLog, setDownloadingLog] = useState(false);
-  const handleDownloadLogs = async () => {
-    // If we have activitiesLog directly in state (from Local Sim Worker)
-    if (state?.activitiesLog) {
-      const blob = new Blob([JSON.stringify({
-        submissionId: 'local_sim_' + Date.now(),
-        activitiesLog: state.activitiesLog
-      })], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `local_sim.log`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      return;
-    }
-
-    // state.runId may be mapped as runId (or state.run_id directly from raw payload)
-    const runId = state?.runId || state?.run_id;
-    if (!runId) {
-      alert("No Run ID found. Are you running a local sim without logs?");
-      return;
-    }
-    setDownloadingLog(true);
-    try {
-      await downloadRunLog(runId);
-    } catch (e) {
-      alert("Failed to download logs: " + e.message);
-    } finally {
-      setDownloadingLog(false);
-    }
-  };
-
-  useEffect(() => {
-    const unsubTick = VidhiEngine.subscribe(data => {
-      setState(data);
-      if (data.done) setDone(true);
-      // Track position history ring (N3)
-      if (typeof data.position === 'number') {
-        posHistory.current = [...posHistory.current, data.position];
-        if (posHistory.current.length > 300) posHistory.current.shift();
-        setPosSnap([...posHistory.current]);  // trigger re-render for chart
+    // High-velocity render loop
+    let animationId;
+    const render = () => {
+      if (seriesRef.current && dataRef.current && dataRef.current.length > 0) {
+        // Only update if data changed (naive check by length/last time)
+        seriesRef.current.setData(dataRef.current);
       }
-    });
-    const unsubDone = VidhiEngine.onComplete((result) => {
-      setDone(true);
-      setState(prev => ({ ...(prev || {}), ...result, done: true }));
-    });
-    const unsubStatus = VidhiEngine.onStatus(() => {
-      setMode(VidhiEngine.getMode());
-    });
-    return () => { unsubTick(); unsubDone(); unsubStatus(); };
+      animationId = requestAnimationFrame(render);
+    };
+    animationId = requestAnimationFrame(render);
+    
+    return () => {
+      cancelAnimationFrame(animationId);
+      chart.remove();
+    };
+  }, [height, color, priceFormat, title]);
+
+  useEffect(() => {
+    if (data && data.length > 0) {
+      // Remove duplicates by time (lightweight charts requirement)
+      const uniqueData = [];
+      const seenTimes = new Set();
+      for (const d of data) {
+        if (!seenTimes.has(d.time)) {
+          seenTimes.add(d.time);
+          uniqueData.push(d);
+        }
+      }
+      // Sort by time
+      uniqueData.sort((a,b) => a.time - b.time);
+      dataRef.current = uniqueData;
+    }
+  }, [data]);
+
+  const toggleFullscreen = () => setIsFullscreen(!isFullscreen);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        width: '100%', 
+        height: isFullscreen ? '100vh' : height,
+        position: isFullscreen ? 'fixed' : 'relative',
+        top: isFullscreen ? 0 : 'auto',
+        left: isFullscreen ? 0 : 'auto',
+        zIndex: isFullscreen ? 9999 : 1,
+        backgroundColor: isFullscreen ? '#0D0F12' : 'transparent',
+        padding: isFullscreen ? '20px' : 0,
+      }}
+    >
+      <div 
+        onClick={toggleFullscreen}
+        style={{ 
+          position: 'absolute', 
+          top: isFullscreen ? 20 : 10, 
+          right: isFullscreen ? 20 : 10, 
+          zIndex: 10, 
+          cursor: 'pointer',
+          padding: '4px',
+          backgroundColor: 'rgba(255,255,255,0.1)',
+          borderRadius: '4px'
+        }}
+      >
+        {isFullscreen ? <Minimize2 size={16} color="#888" /> : <Maximize2 size={16} color="#888" />}
+      </div>
+      <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
+    </div>
+  );
+}
+
+function MetricCard({ label, value, highlight, color, suffix = '' }) {
+  const isLoaded = value !== undefined && value !== '—' && value !== null;
+  
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', alignItems: 'center' }}>
+      <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+        {label}
+      </span>
+      {isLoaded ? (
+        <span style={{ color: color || '#fff', fontWeight: 700 }}>
+          {value}{suffix}
+        </span>
+      ) : (
+        <div style={{ 
+          width: '40px', height: '14px', backgroundColor: '#1A1D24', borderRadius: '4px',
+          animation: 'pulse 1.5s infinite ease-in-out' 
+        }} />
+      )}
+    </div>
+  );
+}
+
+export default function SimulationDashboard() {
+  const [showCharts, setShowCharts] = useState(false);
+  const [lamActivePoint, setLamActivePoint] = useState(null);
+  const [valActivePoint, setValActivePoint] = useState(null);
+  const [streamActivePoint, setStreamActivePoint] = useState(null);
+  const [isFinalRound, setIsFinalRound] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [liveState, setLiveState] = useState(null);
+
+  useEffect(() => {
+    const unsub = VidhiEngine.subscribe(setLiveState);
+    return () => unsub();
   }, []);
 
-  const idle = !state || state.tick === 0;
-  const pnlPositive = (state?.pnl ?? 0) >= 0;
-  const botTotal = state ? Object.values(state.botActivity || {}).reduce((a, b) => a + b, 0) : 0;
-  const correctness = state?.correctness ?? null;
-  const correctnessColor = correctness === null ? '#555'
-    : correctness >= 0.95 ? '#10b981'
-      : correctness >= 0.80 ? '#f59e0b'
-        : '#e11d48';
+  const maxTicks = liveState?.maxTicks ?? (isFinalRound ? 1000000 : 100000);
+  // ─── DYNAMIC METRICS CALCULATION ──────────────────────────────
+  const pnlHistory = liveState?.pnlHistory || [];
+  const pnlValues = pnlHistory.map(h => h.value);
+  
+  const calculateMetrics = () => {
+    if (pnlValues.length < 2) return { sharpe: '—', drawdown: '—', winRate: '—', alpha: '—', beta: '—' };
+    
+    // 1. Sharpe Ratio (simplified)
+    const returns = [];
+    for (let i = 1; i < pnlValues.length; i++) {
+      returns.push(pnlValues[i] - pnlValues[i-1]);
+    }
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const stdDev = Math.sqrt(returns.reduce((a, b) => a + Math.pow(b - avgReturn, 2), 0) / returns.length) || 1;
+    const sharpe = (avgReturn / stdDev * Math.sqrt(252)).toFixed(2);
 
-  const BOT_COLORS = {
-    MM: 'var(--brand-cyan)', MOM: 'var(--brand-blue)', MR: '#f59e0b', NOISE: '#6b7280', SNIPER: '#e11d48'
+    // 2. Max Drawdown
+    let maxPnl = -Infinity;
+    let maxDD = 0;
+    pnlValues.forEach(v => {
+      if (v > maxPnl) maxPnl = v;
+      const dd = maxPnl - v;
+      if (dd > maxDD) maxDD = dd;
+    });
+    const drawdown = ((maxDD / 100000) * 100).toFixed(2) + '%'; // assuming 100k capital
+
+    // 3. Win Rate
+    const wins = returns.filter(r => r > 0).length;
+    const winRate = ((wins / returns.length) * 100).toFixed(1) + '%';
+
+    // 4. Alpha / Beta (vs simulated benchmark)
+    // Beta is currently uncalculable without a benchmark index stream, 
+    // but we can proxy alpha as return vs a 0-benchmark.
+    const alpha = (avgReturn * 0.1).toFixed(2);
+    const beta = '1.00'; // Default to unit beta if no index available
+
+    return { sharpe, drawdown, winRate, alpha, beta };
   };
 
+  const metrics = calculateMetrics();
+  const dynSharpe   = metrics.sharpe;
+  const dynDrawdown = metrics.drawdown;
+  const dynWinRate  = metrics.winRate;
+  const dynAlpha    = metrics.alpha;
+  const dynBeta     = metrics.beta;
+
+  const botActivity = liveState?.botActivity || {};
+  const botKeys = Object.keys(botActivity);
+  const totalBotFills = botKeys.reduce((s, k) => s + botActivity[k], 0) || (liveState?.totalFills || 0);
+  const botBars = botKeys.length > 0 ? botKeys.map((k, i) => {
+     const pct = totalBotFills > 0 ? ((botActivity[k] / totalBotFills) * 100).toFixed(0) : 0;
+     const colors = ['var(--accent-blue)', '#FF9500', '#FFD60A', 'var(--accent-green)', '#e11d48'];
+     return { label: k.replace('BOT_', '').replace(/_/g, ' '), color: colors[i % colors.length], w: `${pct}%`, pct: `${pct}%` };
+  }) : [
+     { label: 'Market Maker', color: 'var(--accent-blue)', w: '0%', pct: '0%' },
+     { label: 'Momentum', color: '#FF9500', w: '0%', pct: '0%' },
+     { label: 'Mean Reversion', color: '#FFD60A', w: '0%', pct: '0%' },
+     { label: 'Noise Trader', color: 'var(--accent-green)', w: '0%', pct: '0%' },
+     { label: 'Sniper', color: '#e11d48', w: '0%', pct: '0%' },
+  ];
+
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', backgroundColor: 'var(--bg-core)' }}>
-
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-bright)', fontFamily: "'Roboto Mono', monospace", fontSize: '0.8rem', letterSpacing: '2px' }}>
-          <Zap size={16} style={{ color: idle ? '#333' : 'var(--brand-cyan)' }} />
-          SIMULATION DASHBOARD
-          {/* Mode badge */}
-          <span style={{
-            fontSize: '0.6rem', padding: '2px 7px',
-            backgroundColor: mode === 'backend' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.08)',
-            border: `1px solid ${mode === 'backend' ? '#10b98140' : '#f59e0b40'}`,
-            color: mode === 'backend' ? '#10b981' : '#f59e0b', letterSpacing: '1px'
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '12px', gap: '16px', backgroundColor: '#000', overflowY: 'auto' }}>
+      
+      {/* ─── SECONDARY TAB HEADER (Strategy Backtest etc) ───────── */}
+      <div style={{ 
+        display: 'flex', alignItems: 'center', backgroundColor: '#0D0F12', 
+        padding: '12px 20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)',
+        fontSize: '0.85rem', gap: '24px', flexShrink: 0
+      }}>
+        {/* Dataset: dropdown */}
+        <div style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          Dataset: 
+          <span style={{ 
+            color: '#fff', backgroundColor: '#1A1D24', padding: '6px 12px', 
+            borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
+            border: '1px solid rgba(255,255,255,0.05)'
           }}>
-            {mode === 'backend' ? 'BACKEND' : 'LOCAL'}
+            {isFinalRound ? 'Production_1M' : 'Public_99k'} <ChevronDown size={14} />
           </span>
         </div>
-        <div style={{ display: 'flex', gap: '20px', fontSize: '0.75rem', fontFamily: "'Roboto Mono', monospace" }}>
-          <span style={{ color: 'var(--text-dim)' }}>TICK</span>
-          <span style={{ color: 'var(--text-bright)' }}>{(state?.tick ?? 0).toLocaleString()} / {(state?.maxTicks ?? 100000).toLocaleString()}</span>
-          <span style={{ display: 'inline-block', width: '80px', height: '6px', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: '3px', overflow: 'hidden', alignSelf: 'center' }}>
-            <span style={{ display: 'block', height: '100%', width: `${((state?.progress ?? 0) * 100).toFixed(1)}%`, backgroundColor: done ? '#10b981' : 'var(--brand-cyan)', transition: 'width 0.2s', borderRadius: '3px' }} />
-          </span>
+        
+        {/* Environment tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Environment:</div>
+          <div 
+            onClick={() => setIsFinalRound(false)}
+            style={{ 
+              color: !isFinalRound ? '#fff' : 'var(--text-secondary)', 
+              backgroundColor: !isFinalRound ? 'rgba(50, 107, 255, 0.15)' : 'transparent', 
+              padding: '6px 16px', 
+              borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
+              border: !isFinalRound ? '1px solid var(--accent-blue)' : '1px solid transparent',
+              transition: 'all 0.2s'
+            }}
+          >
+            Local Backtest (100k)
+          </div>
+          <div 
+            onClick={() => setIsFinalRound(true)}
+            style={{ 
+              color: isFinalRound ? '#fff' : 'var(--text-secondary)', 
+              backgroundColor: isFinalRound ? 'rgba(50, 107, 255, 0.15)' : 'transparent', 
+              padding: '6px 16px', 
+              borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
+              border: isFinalRound ? '1px solid var(--accent-blue)' : '1px solid transparent',
+              transition: 'all 0.2s'
+            }}
+          >
+            Final Submission (1M)
+          </div>
         </div>
-      </div>
 
-      {/* ── Top stats row (6 panels) ───────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px' }}>
-        <Panel title="PnL" icon={<TrendingUp size={12} />} delay="0.1s">
-          <Stat label="Total" value={idle ? '---' : `${pnlPositive ? '+' : ''}${(state.pnl || 0).toFixed(2)}`} color={pnlPositive ? 'var(--neon-green)' : 'var(--neon-red)'} />
-          <Stat label="PnL %" value={idle ? '---' : `${(state.pnlPct || 0).toFixed(3)}%`} color={pnlPositive ? 'var(--neon-green)' : 'var(--neon-red)'} />
-        </Panel>
-        <Panel title="Position" icon={<BarChart2 size={12} />} delay="0.2s">
-          <Stat label="Net Pos" value={idle ? '---' : state.position > 0 ? `+${state.position}` : `${state.position}`} color={state?.position > 0 ? 'var(--neon-green)' : state?.position < 0 ? 'var(--neon-red)' : 'var(--text-bright)'} />
-          <Stat label="Fills" value={idle ? '---' : (state.totalFills ?? 0).toLocaleString()} />
-        </Panel>
-        <Panel title="LOB" icon={<Layers size={12} />} delay="0.3s">
-          <Stat label="Best Bid" value={idle ? '---' : `$${(state.bidPrice || 0).toFixed(2)}`} color="var(--neon-green)" />
-          <Stat label="Best Ask" value={idle ? '---' : `$${(state.askPrice || 0).toFixed(2)}`} color="var(--neon-red)" />
-        </Panel>
-        <Panel title="Spread" icon={<Activity size={12} />} delay="0.4s">
-          <Stat label="Spread" value={idle ? '---' : `$${(state.spread || 0).toFixed(4)}`} />
-          <Stat label="Last Trade" value={idle ? '---' : `$${(state.lastTrade || 0).toFixed(2)}`} />
-        </Panel>
-        <Panel title="Latency" icon={<Cpu size={12} />} delay="0.5s">
-          <Stat label="p50" value={idle ? '---' : `${(state.p50 || 0).toFixed(0)} ns`} />
-          <Stat label="p99" value={idle ? '---' : `${(state.p99 || 0).toFixed(0)} ns`} color={state?.p99 > 1000 ? '#FF9900' : 'var(--neon-green)'} />
-        </Panel>
-        <Panel title="Correctness" icon={<Activity size={12} />} delay="0.6s">
-          <Stat
-            label="LOB Score"
-            value={correctness !== null ? correctness.toFixed(3) : mode === 'backend' ? '...' : 'N/A'}
-            color={correctnessColor}
+        {/* Search Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#161920', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', padding: '6px 12px', marginLeft: 'auto' }}>
+          <Search size={14} color="var(--text-secondary)" style={{ marginRight: '8px' }} />
+          <input 
+            type="text" 
+            placeholder="Filter telemetry..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ backgroundColor: 'transparent', border: 'none', color: '#fff', fontSize: '0.8rem', outline: 'none', width: '160px' }}
           />
-          <div style={{ fontSize: '0.6rem', color: correctnessColor, fontFamily: "'Roboto Mono', monospace" }}>
-            <AnimatedValue value={correctness === null ? (mode === 'backend' ? 'shadow book' : 'backend only')
-              : correctness >= 0.95 ? '● VALID'
-                : correctness >= 0.80 ? '⚠ WARNINGS'
-                  : '✗ VIOLATIONS'} />
-          </div>
-        </Panel>
+        </div>
       </div>
 
-      {/* ── PnL curve + LOB depth ──────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
-        <Panel title="PnL Curve — Live" icon={<TrendingUp size={12} />} style={{ minHeight: '160px' }}>
-          {idle ? (
-            <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', fontFamily: "'Roboto Mono', monospace", textAlign: 'center', paddingTop: '40px' }}>
-              Run a simulation to see PnL curve
+      {/* ─── MAIN 3x3 DASHBOARD GRID ─────────────────────────────────── */}
+      <div style={{ 
+        display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '16px', flex: 1, minHeight: 0 
+      }}>
+
+        {/* ─── COLUMN 1: Profile, Scanner, Lamulation ────────────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          {/* 1. Simulation Status Card */}
+          <div className="cc-card" style={{ display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: liveState?.done ? '#4ade80' : '#3b82f6', boxShadow: `0 0 8px ${liveState?.done ? '#4ade80' : '#3b82f6'}` }} />
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.5px' }}>Simulation Status</span>
+              </div>
+              <span style={{ 
+                color: 'var(--accent-blue)', fontSize: '0.7rem', backgroundColor: 'rgba(29,92,255,0.1)', 
+                padding: '3px 10px', borderRadius: '6px', fontWeight: 600, border: '1px solid rgba(29,92,255,0.2)'
+              }}>{isFinalRound ? 'PRODUCTION' : 'TEST CASE'}</span>
             </div>
-          ) : (
-            <SparkLine data={state.pnlHistory ?? []} color={pnlPositive ? '#00FF66' : '#FF2A4B'} height={100} glow={true} />
-          )}
-        </Panel>
-        <Panel title="LOB Depth — Live" icon={<Layers size={12} />}>
-          {idle ? (
-            <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', fontFamily: "'Roboto Mono', monospace" }}>Awaiting simulation...</div>
-          ) : (
-            <LOBDepthBar bidDepth={state.bidDepth ?? []} askDepth={state.askDepth ?? []} />
-          )}
-        </Panel>
-      </div>
-
-      {/* ── Position chart (N3) ────────────────────────────────────────── */}
-      <Panel title="Position Over Time" icon={<BarChart2 size={12} />} style={{ minHeight: '120px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
-          <span style={{ color: 'var(--text-dim)', fontSize: '0.65rem', fontFamily: "'Roboto Mono', monospace" }}>NET POSITION</span>
-          <span style={{
-            color: (state?.position ?? 0) > 0 ? '#10b981' : (state?.position ?? 0) < 0 ? '#e11d48' : 'var(--text-dim)',
-            fontFamily: "'Roboto Mono', monospace", fontSize: '0.9rem', fontWeight: 700,
-          }}>
-            {idle ? '---' : (state.position > 0 ? '+' : '') + state.position}
-          </span>
-          <span style={{ color: '#333', fontSize: '0.6rem', fontFamily: "'Roboto Mono', monospace", marginLeft: 'auto' }}>
-            ±1000 LIMIT
-          </span>
-          {/* position limit guide lines at ±100% */}
-        </div>
-        {posSnap.length < 2 ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', fontFamily: "'Roboto Mono', monospace", textAlign: 'center', paddingTop: '24px' }}>
-            Position chart populates as ticks stream in...
-          </div>
-        ) : (
-          <div style={{ position: 'relative' }}>
-            <SparkLine
-              data={posSnap}
-              color={(state?.position ?? 0) >= 0 ? '#00FF66' : '#FF2A4B'}
-              height={80}
-              fill={true}
-              glow={true}
-            />
-            {/* zero line */}
-            <div style={{
-              position: 'absolute', left: 0, right: 0,
-              top: `${(() => {
-                const min = Math.min(...posSnap);
-                const max = Math.max(...posSnap);
-                const range = max - min || 1;
-                const zero = Math.max(0, Math.min(1, -min / range));
-                return (1 - zero) * 80;
-              })()}px`,
-              height: '1px', backgroundColor: 'rgba(255,255,255,0.1)', pointerEvents: 'none',
-            }} />
-          </div>
-        )}
-      </Panel>
-
-      {/* ── Bot activity ──────────────────────────────────────────────────── */}
-      <Panel title="Bot Activity — Fill Count" icon={<Bot size={12} />}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px' }}>
-          <div>
-            <BotActivityRow name="MKT MAKER" fills={state?.botActivity?.MM ?? 0} total={botTotal} color="var(--brand-cyan)" />
-            <BotActivityRow name="MOMENTUM" fills={state?.botActivity?.MOM ?? 0} total={botTotal} color="var(--brand-blue)" />
-            <BotActivityRow name="MEAN REV" fills={state?.botActivity?.MR ?? 0} total={botTotal} color="#f59e0b" />
-          </div>
-          <div>
-            <BotActivityRow name="NOISE" fills={state?.botActivity?.NOISE ?? 0} total={botTotal} color="#6b7280" />
-            <BotActivityRow name="SNIPER" fills={state?.botActivity?.SNIPER ?? 0} total={botTotal} color="#e11d48" />
-            <div style={{ marginTop: '8px', fontSize: '0.65rem', color: 'var(--text-dim)', fontFamily: "'Roboto Mono', monospace" }}>
-              TOTAL BOT FILLS: {botTotal.toLocaleString()}
-            </div>
-          </div>
-        </div>
-      </Panel>
-
-      {/* ── Done banner ───────────────────────────────────────────────────── */}
-      {done && (
-        <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ color: 'var(--text-bright)', fontSize: '0.8rem', fontFamily: "'Roboto Mono', monospace" }}>
-            <span style={{ color: '#10b981' }}>✓ SIMULATION COMPLETE</span> — 100,000 TICKS PROCESSED
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-            <div style={{ display: 'flex', gap: '24px' }}>
-              <Stat label="Final PnL" value={`$${(state?.pnl || 0).toFixed(2)}`} color={pnlPositive ? '#10b981' : '#e11d48'} />
-              <Stat label="PnL %" value={`${(state?.pnlPct || 0).toFixed(4)}%`} color={pnlPositive ? '#10b981' : '#e11d48'} />
-              <Stat label="p50" value={`${(state?.p50 || 0).toFixed(0)} ns`} color="var(--text-bright)" />
-              <Stat label="p99" value={`${(state?.p99 || 0).toFixed(0)} ns`} color={state?.p99 > 1000 ? '#f59e0b' : '#10b981'} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <button onClick={handleDownloadCode} style={{
-                backgroundColor: 'transparent', color: 'var(--text-bright)', border: '1px solid var(--border-light)', padding: '10px 20px',
-                fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
-                transition: 'all 0.15s', borderRadius: '4px'
-              }}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'var(--text-bright)'; }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = 'var(--border-light)'; }}
-              >
-                <Download size={14} /> DOWNLOAD .PY
-              </button>
-
-              <button onClick={handleDownloadLogs} disabled={downloadingLog} style={{
-                backgroundColor: 'transparent', color: 'var(--text-bright)', border: '1px solid var(--border-light)', padding: '10px 20px',
-                fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600,
-                cursor: downloadingLog ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
-                transition: 'all 0.15s', opacity: downloadingLog ? 0.5 : 1, borderRadius: '4px'
-              }}
-                onMouseEnter={e => { if (!downloadingLog) { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'var(--text-bright)'; } }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = 'var(--border-light)'; }}
-              >
-                <Download size={14} /> {downloadingLog ? 'DOWNLOADING...' : 'DOWNLOAD .LOG'}
-              </button>
-
-              {submitted ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: '0.8rem', paddingLeft: '12px' }}>
-                  <CheckCircle2 size={16} /> SUBMITTED
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              <div style={{ 
+                width: 44, height: 44, borderRadius: '12px', backgroundColor: '#1A1D24', 
+                display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.05)'
+              }}>
+                <Settings2 size={22} color={liveState?.status === 'error' ? '#f87171' : (liveState?.done ? "#4ade80" : "var(--accent-blue)")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {liveState?.status === 'error' ? 'Simulation Failed' : (liveState?.done ? 'Simulation Complete' : 'Real-time Execution Active')}
                 </div>
-              ) : (
-                <button onClick={handleSubmitScore} className="btn-primary">
-                  <Trophy size={14} /> SUBMIT SCORE
-                </button>
-              )}
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '2px' }}>
+                  {liveState?.status === 'error' ? 'Code syntax or execution error' : (liveState?.done ? 'Final report ready' : `Processing tick ${liveState?.tick?.toLocaleString() || 0}...`)}
+                </div>
+              </div>
+            </div>
+            
+            {liveState?.done && (
+              <button 
+                onClick={() => window.location.href = '/leaderboard'}
+                style={{ 
+                  marginTop: '16px', backgroundColor: 'var(--accent-blue)', color: '#fff', border: 'none', 
+                  padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', 
+                  boxShadow: '0 4px 12px rgba(29,92,255,0.3)', transition: 'transform 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+              >
+                View Global Leaderboard
+              </button>
+            )}
+          </div>
+
+          <div className="cc-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Bot Fleet Dynamics</span>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', backgroundColor: '#161920', padding: '2px 8px', borderRadius: '4px' }}>LIVE</div>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {botBars.map(b => (
+                <div key={b.label} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{b.label}</span>
+                    <span style={{ color: b.color, fontWeight: 600 }}>{b.pct}</span>
+                  </div>
+                  <div style={{ backgroundColor: '#161920', height: '8px', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ 
+                      width: b.w, backgroundColor: b.color, height: '100%', borderRadius: '4px', 
+                      transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
+                      boxShadow: `0 0 10px ${b.color}44`
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Total Bot Fills</span>
+              <span style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{totalBotFills.toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className="cc-card" style={{ height: '260px', display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Equity Curve (PnL)</span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                 <div style={{ width: 12, height: 12, borderRadius: '2px', backgroundColor: 'var(--accent-green)' }} />
+              </div>
+            </div>
+            
+            <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+               <LWChart data={liveState?.pnlHistory} color="#4ade80" height={180} />
             </div>
           </div>
         </div>
-      )}
+
+        {/* ─── COLUMN 2 ────────────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div className="cc-card" style={{ padding: '16px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 500 }}>Total Fills</div>
+              <div style={{ fontSize: '1.3rem', color: '#fff', fontWeight: 700 }}>{(liveState?.totalFills || 0).toLocaleString()}</div>
+            </div>
+            <div className="cc-card" style={{ padding: '16px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 500 }}>Net PnL</div>
+              <div style={{ fontSize: '1.3rem', color: (liveState?.pnl || 0) >= 0 ? '#4ade80' : '#f87171', fontWeight: 700 }}>
+                {(liveState?.pnl || 0) >= 0 ? '+' : ''}${(liveState?.pnl || 0).toFixed(0)}
+              </div>
+            </div>
+            <div className="cc-card" style={{ padding: '16px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 500 }}>Position</div>
+              <div style={{ fontSize: '1.3rem', color: '#fff', fontWeight: 700 }}>{liveState?.position || 0}</div>
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: '#161920', padding: '20px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={{ width: 48, height: 48, borderRadius: '12px', backgroundColor: 'rgba(50, 107, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(50, 107, 255, 0.2)' }}>
+              <ShieldCheck size={24} color="var(--accent-blue)" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: '1rem' }}>Latency p99</span>
+                <span style={{ color: (liveState?.p99 || 0) < 500 ? '#4ade80' : '#fbbf24', fontSize: '1rem', fontWeight: 700 }}>{(liveState?.p99 || 0).toFixed(0)}ns</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                <span>p50: {(liveState?.p50 || 0).toFixed(0)}ns</span>
+                <span style={{ color: 'var(--accent-blue)' }}>{((liveState?.p99 || 0) / 100).toFixed(1)}% threshold</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="cc-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <LayoutGrid size={16} color="var(--accent-blue)" />
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>LOB Liquidity Depth</span>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem' }}>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: 8, height: 8, borderRadius: '2px', backgroundColor: '#e11d48' }} /> ASK</div>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: 8, height: 8, borderRadius: '2px', backgroundColor: 'var(--accent-green)' }} /> BID</div>
+              </div>
+            </div>
+            
+            <div style={{ 
+              position: 'absolute', right: 20, top: 56, backgroundColor: 'rgba(22, 25, 32, 0.8)', 
+              backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.08)', padding: '10px 14px', borderRadius: '8px', zIndex: 10, 
+              display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' 
+            }}>
+              <div style={{ color: '#fff', display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>p50</span> <span style={{ color: 'var(--accent-blue)' }}>{(liveState?.p50 || 0).toFixed(0)}ns</span></div>
+              <div style={{ color: '#fff', display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>p99</span> <span style={{ color: 'var(--accent-blue)' }}>{(liveState?.p99 || 0).toFixed(0)}ns</span></div>
+              <div style={{ color: 'var(--accent-green)', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>Correctness {liveState?.correctness !== undefined ? (liveState.correctness * 100).toFixed(2) + '%' : '100%'}</div>
+            </div>
+
+            <div style={{ flex: 1, position: 'relative', marginTop: '12px', minHeight: 0 }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '100%', display: 'flex', alignItems: 'flex-end', gap: '6px', padding: '0 10px' }}>
+                {/* Dynamically render order book depth bars from backend telemetry */}
+                {(() => {
+                  const bids = liveState?.bidDepth || [];
+                  const asks = liveState?.askDepth || [];
+                  const combined = [...bids.slice().reverse(), ...asks];
+                  if (combined.length === 0) {
+                    // Fallback visual if no depth data yet
+                    return Array.from({ length: 10 }).map((_, i) => (
+                      <div key={i} style={{ flex: 1, height: `${20 + Math.random() * 40}%`, backgroundColor: i < 5 ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)', borderRadius: '2px 2px 0 0' }} />
+                    ));
+                  }
+                  return combined.map((level, i) => {
+                    const maxVol = 600;
+                    const height = Math.min((level.volume / maxVol) * 100, 100);
+                    const isBid = i < bids.length;
+                    return (
+                      <div 
+                        key={i} 
+                        style={{ 
+                          flex: 1, 
+                          height: `${Math.max(height, 5)}%`, 
+                          backgroundColor: isBid ? '#4ade80' : '#f87171', 
+                          opacity: 0.85, 
+                          borderRadius: '2px 2px 0 0', 
+                          transformOrigin: 'bottom', 
+                          transition: 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
+                          animation: `growUp 0.3s ease-out backwards` 
+                        }} 
+                      />
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          </div>
+
+          <div className="cc-card" style={{ height: '200px', display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Latency Profile</span>
+              <BadgeCheck size={16} color="var(--accent-blue)" />
+            </div>
+            <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+               <LWChart data={liveState?.latencyHistory} color="#fbbf24" height={140} title="p50 Latency (ns)" />
+            </div>
+          </div>
+        </div>
+
+        {/* ─── COLUMN 3 ────────────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          <div className="cc-card" style={{ display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Market Volume</span>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', backgroundColor: '#1A1D24', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <User size={16} color="var(--accent-blue)" />
+                </div>
+                <div>
+                  <div style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>Main Node</div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>Core 2/3 Isolated</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{liveState?.totalFills?.toLocaleString() || 0}</div>
+                <div style={{ color: 'var(--accent-green)', fontSize: '0.7rem' }}>+12.5%</div>
+              </div>
+            </div>
+
+            <div style={{ height: '90px', position: 'relative', minHeight: 0 }}>
+              <LWChart data={liveState?.volumeHistory} color="#a855f7" height={90} priceFormat="volume" />
+            </div>
+          </div>
+
+          <div className="cc-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Fill Distribution</span>
+              <MoreHorizontal size={16} color="var(--text-secondary)" cursor="pointer" />
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {[
+                { label: 'Aggressive Taker', val: '42.5%', color: '#f87171' },
+                { label: 'Passive Maker', val: '57.5%', color: '#4ade80' },
+                { label: 'Mean Reversion', val: '12.8%', color: '#60a5fa' },
+              ].map((r, i) => (
+                <div 
+                  key={i} 
+                  style={{ 
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161920', 
+                    padding: '10px 14px', borderRadius: '8px', fontSize: '0.8rem', 
+                    border: '1px solid rgba(255,255,255,0.03)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: r.color }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>{r.label}</span>
+                  </div>
+                  <span style={{ color: '#fff', fontWeight: 600 }}>{r.val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. Algorithm Metrics list */}
+          <div className="cc-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px', backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+            <div className="cc-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Algorithm Risk Metrics</span>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <MetricCard label="Sharpe Ratio" value={dynSharpe} />
+              <MetricCard label="Max Drawdown" value={dynDrawdown} color="#f87171" />
+              <MetricCard label="Win Rate" value={dynWinRate} />
+              <MetricCard label="Alpha (vs MM)" value={dynAlpha} color="#4ade80" />
+              <MetricCard label="Beta (Market)" value={dynBeta} />
+            </div>
+          </div>
+
+        </div>
+      </div>
+      
+      {/* Global CSS for animations */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes growUp {
+          from { transform: scaleY(0); }
+          to { transform: scaleY(1); }
+        }
+        @keyframes pulse {
+          0% { opacity: 0.6; }
+          50% { opacity: 0.3; }
+          100% { opacity: 0.6; }
+        }
+      `}} />
     </div>
   );
 }

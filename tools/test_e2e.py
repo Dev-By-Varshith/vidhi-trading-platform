@@ -64,9 +64,9 @@ def on_tick(state, orders):
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-PASS = "\033[92m✓\033[0m"
-FAIL = "\033[91m✗\033[0m"
-WARN = "\033[93m⚠\033[0m"
+PASS = "[PASS]"
+FAIL = "[FAIL]"
+WARN = "[WARN]"
 
 def ok(msg: str):
     print(f"  {PASS}  {msg}")

@@ -8,7 +8,7 @@ import { Plus, Settings, Eye, Play, Pause, Trash2, ChevronDown, ChevronUp,
   Bot, Zap, Trophy, Users, BarChart3, Clock, CheckCircle, AlertTriangle,
   TrendingUp, TrendingDown, LogOut, Save, ArrowRight, Upload } from 'lucide-react';
 import ContestStore from '../store/ContestStore';
-import { uploadRoundDataset, triggerFinalEvaluation } from '../api/client';
+import { uploadRoundDataset, triggerFinalEvaluation, connectTelemetryWS } from '../api/client';
 import VidhiEngine from '../engine/VidhiEngine';
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
@@ -93,10 +93,11 @@ function RoundBuilder({ round, roundIndex, availableBots, onChange, onDelete }) 
             />
           </div>
 
-          {/* Grid: tick count, position limit, capital, asset */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px' }}>
+          {/* Grid: tick count, tick rate, position limit, capital, asset */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '12px' }}>
             {[
               { label: 'TICK COUNT', field: 'tickCount', placeholder: '100000', type: 'number' },
+              { label: 'TICK RATE (ms)', field: 'tickRate', placeholder: '1', type: 'number' },
               { label: 'POSITION LIMIT', field: 'positionLimit', placeholder: '1000', type: 'number' },
               { label: 'STARTING CAPITAL $', field: 'startingCapital', placeholder: '100000', type: 'number' },
               { label: 'ASSET NAME', field: 'assetName', placeholder: 'VIDHI-1', type: 'text' },
@@ -193,43 +194,49 @@ function RoundBuilder({ round, roundIndex, availableBots, onChange, onDelete }) 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
               <div style={labelStyle}>TEST DATASET (CSV) - 99.99k ticks</div>
-              <label style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: round.testDataName ? '#10b981' : '#555' }}>
+              <label style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: round.testDataName && !round.testDataName.includes('Failed') ? '#10b981' : (round.testDataName?.includes('Failed') ? '#e11d48' : '#555'), borderColor: round.testDataName?.includes('Failed') ? '#e11d48' : '#1a1a1a' }}>
                 <Upload size={14} /> {round.testDataName || 'Upload Test CSV...'}
                 <input type="file" accept=".csv" style={{ display: 'none' }} onChange={async (e) => {
                   const file = e.target.files[0];
                   if (!file) return;
-                  if (!round.id) { alert("Please save contest first before uploading"); return; }
+                  if (!round.id || !round.id.startsWith('round_')) { 
+                    alert("Please PUBLISH contest first to generate backend round IDs before uploading datasets."); 
+                    return; 
+                  }
                   
                   try {
                     onChange({ ...round, testDataName: 'Uploading...' });
                     const res = await uploadRoundDataset(round.id, file, false);
-                    onChange({ ...round, testDataName: file.name, testDataKey: res.path });
+                    onChange({ ...round, testDataName: file.name, testDataKey: res.path, testDataError: null });
                   } catch (err) {
-                    alert('Upload failed: ' + err.message);
-                    onChange({ ...round, testDataName: null });
+                    onChange({ ...round, testDataName: 'Upload Failed', testDataError: err.message });
                   }
                 }} />
               </label>
+              {round.testDataError && <div style={{...mono, fontSize: '0.6rem', color: '#e11d48', marginTop: '4px'}}>Error: {round.testDataError}</div>}
             </div>
             <div>
               <div style={labelStyle}>FINAL EVAL DATASET (CSV) - 999.99k ticks</div>
-              <label style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: round.finalDataName ? '#10b981' : '#555' }}>
+              <label style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: round.finalDataName && !round.finalDataName.includes('Failed') ? '#10b981' : (round.finalDataName?.includes('Failed') ? '#e11d48' : '#555'), borderColor: round.finalDataName?.includes('Failed') ? '#e11d48' : '#1a1a1a' }}>
                 <Upload size={14} /> {round.finalDataName || 'Upload Final CSV...'}
                 <input type="file" accept=".csv" style={{ display: 'none' }} onChange={async (e) => {
                   const file = e.target.files[0];
                   if (!file) return;
-                  if (!round.id) { alert("Please save contest first before uploading"); return; }
+                  if (!round.id || !round.id.startsWith('round_')) { 
+                    alert("Please PUBLISH contest first to generate backend round IDs before uploading datasets."); 
+                    return; 
+                  }
 
                   try {
                     onChange({ ...round, finalDataName: 'Uploading...' });
                     const res = await uploadRoundDataset(round.id, file, true);
-                    onChange({ ...round, finalDataName: file.name, finalDataKey: res.path });
+                    onChange({ ...round, finalDataName: file.name, finalDataKey: res.path, finalDataError: null });
                   } catch (err) {
-                    alert('Upload failed: ' + err.message);
-                    onChange({ ...round, finalDataName: null });
+                    onChange({ ...round, finalDataName: 'Upload Failed', finalDataError: err.message });
                   }
                 }} />
               </label>
+              {round.finalDataError && <div style={{...mono, fontSize: '0.6rem', color: '#e11d48', marginTop: '4px'}}>Error: {round.finalDataError}</div>}
             </div>
           </div>
         </div>
@@ -237,9 +244,70 @@ function RoundBuilder({ round, roundIndex, availableBots, onChange, onDelete }) 
     </div>
   );
 }
+// ─── GMTimer ────────────────────────────────────────────────────────────────
+function GMTimer({ contest }) {
+  const [timeLeft, setTimeLeft] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const now = new Date();
+      let activeOrNext = null;
+      let isBreak = false;
+      
+      const rounds = contest.rounds || [];
+      
+      // Find currently running round
+      let currentRound = rounds.find(r => r.startAt && r.endAt && now >= new Date(r.startAt) && now <= new Date(r.endAt));
+      
+      if (currentRound) {
+        activeOrNext = currentRound;
+      } else {
+        // Find next upcoming round (Break logic)
+        let nextRound = rounds.find(r => r.startAt && now < new Date(r.startAt));
+        if (nextRound) {
+          activeOrNext = nextRound;
+          isBreak = true;
+        }
+      }
+
+      if (!activeOrNext) {
+        setStatus('FINISHED');
+        setTimeLeft('--:--:--');
+        return;
+      }
+
+      const targetDate = new Date(isBreak ? activeOrNext.startAt : activeOrNext.endAt);
+      const diff = targetDate - now;
+
+      if (diff <= 0) {
+        setTimeLeft('00:00:00');
+        return;
+      }
+
+      const h = Math.floor(diff / (1000 * 60 * 60));
+      const m = Math.floor((diff / 1000 / 60) % 60);
+      const s = Math.floor((diff / 1000) % 60);
+
+      setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+      setStatus(isBreak ? `BREAK (Starts in)` : `ROUND ENDS IN`);
+    };
+
+    updateTimer();
+    const int = setInterval(updateTimer, 1000);
+    return () => clearInterval(int);
+  }, [contest]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <span style={{ fontSize: '0.65rem', color: status.includes('BREAK') ? '#f59e0b' : '#10b981' }}>{status}</span>
+      <span style={{ fontSize: '0.9rem', color: status.includes('BREAK') ? '#f59e0b' : '#10b981' }}>{timeLeft}</span>
+    </div>
+  );
+}
 
 // ─── Monitor panel (live scores for a contest) ───────────────────────────────
-function MonitorPanel({ contest }) {
+function MonitorPanel({ contest, telemetry }) {
   const lb = ContestStore.getLeaderboard(contest.id);
   const [evaluating, setEvaluating] = useState(false);
   
@@ -263,13 +331,25 @@ function MonitorPanel({ contest }) {
     setEvaluating(false);
   };
 
+  const isTelemOnline = telemetry?.status === 'online';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '1px', backgroundColor: '#111' }}>
+      
+      {/* Telemetry Status Banner */}
+      <div style={{ padding: '8px 12px', backgroundColor: isTelemOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', border: `1px solid ${isTelemOnline ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`, borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: isTelemOnline ? '#10b981' : '#f59e0b', boxShadow: isTelemOnline ? '0 0 8px #10b981' : 'none' }}></div>
+        <span style={{ ...mono, fontSize: '0.7rem', color: isTelemOnline ? '#10b981' : '#f59e0b' }}>
+          {isTelemOnline ? 'TELEMETRY WEBSOCKET CONNECTED' : 'TELEMETRY OFFLINE - RECONNECTING...'}
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '1px', backgroundColor: '#111', opacity: isTelemOnline ? 1 : 0.6 }}>
         {[
           { label: 'PARTICIPANTS', value: contest.participants.length },
           { label: 'ACTIVE ROUND', value: contest.rounds.find(r => r.status === 'active')?.name?.split('—')[0] ?? 'None' },
           { label: 'STATUS', value: contest.status.toUpperCase() },
+          { label: 'TIMER', value: <GMTimer contest={contest} /> },
         ].map(s => (
           <div key={s.label} style={{ backgroundColor: '#050505', padding: '12px' }}>
             <div style={{ ...mono, fontSize: '0.55rem', color: '#555', letterSpacing: '1px', marginBottom: '3px' }}>{s.label}</div>
@@ -354,7 +434,7 @@ function MonitorPanel({ contest }) {
 // ─── Main Creator Dashboard ───────────────────────────────────────────────────
 const BLANK_ROUND = {
   name: '', description: '',
-  tickCount: 100000, positionLimit: 1000, startingCapital: 100000,
+  tickCount: 100000, tickRate: 1, positionLimit: 1000, startingCapital: 100000,
   activeBots: ['MM', 'NOISE'], botAggressiveness: 0.5,
   asset: { name: 'VIDHI-1', basePrice: 1500, volatility: 'MEDIUM' },
   startAt: '', endAt: '',
@@ -366,20 +446,21 @@ export default function ContestCreator() {
   const [storeState, setStoreState] = useState(ContestStore.state);
   const [monitorTarget, setMonitorTarget] = useState(null);
   const [saveAnim, setSaveAnim] = useState(false);
-
-  const availableBots = [
-    ...BOT_OPTS,
-    ...(storeState.customBots || []).map(b => ({
-      id: b.id, name: b.name, color: '#10b981', desc: 'Custom GM Bot'
-    }))
-  ];
-
-  // Form state for new contest
+  
+  // Form state for create new contest
   const [form, setForm] = useState({
-    name: '', description: '', endsAt: '',
-    maxParticipants: 200,
-    rounds: [{ ...BLANK_ROUND, name: 'Round 1 — Intro' }],
+    name: '', description: '', endsAt: '', maxParticipants: 100,
+    rounds: [{ ...BLANK_ROUND, name: 'Round 1' }],
   });
+
+  const availableBots = BOT_OPTS;
+
+  useEffect(() => {
+    ContestStore.connectTelemetry(connectTelemetryWS);
+    return () => {
+      // Keep running in background or ContestStore handles it? ContestStore handles singleton WS
+    };
+  }, []);
 
   useEffect(() => {
     return ContestStore.subscribe(s => setStoreState({ ...s }));
@@ -425,7 +506,7 @@ export default function ContestCreator() {
   const allContests = storeState.contests;
 
   return (
-    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000',
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#0A0B0D',
       overflowY: 'auto', padding: '28px 32px', boxSizing: 'border-box' }}>
 
       {/* Header */}
@@ -456,15 +537,16 @@ export default function ContestCreator() {
           { key: 'contests', label: 'MY CONTESTS', icon: <Trophy size={13} /> },
           { key: 'create',   label: 'CREATE NEW',  icon: <Plus size={13} /> },
           { key: 'monitor',  label: 'MONITOR',     icon: <BarChart3 size={13} /> },
-          { key: 'bots',     label: 'CUSTOM BOTS', icon: <Bot size={13} /> },
+          { key: 'bots',     label: 'BOT SWARM',   icon: <Bot size={13} /> },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
             padding: '9px 20px', border: 'none', cursor: 'pointer',
-            backgroundColor: tab === t.key ? '#0a0a0a' : '#050505',
-            color: tab === t.key ? '#f59e0b' : '#444',
+            backgroundColor: tab === t.key ? 'rgba(29, 92, 255, 0.1)' : 'transparent',
+            color: tab === t.key ? 'var(--accent-blue)' : '#555',
             ...mono, fontSize: '0.7rem', letterSpacing: '1.5px',
             display: 'flex', alignItems: 'center', gap: '7px',
-            borderBottom: tab === t.key ? '2px solid #f59e0b' : '2px solid transparent',
+            borderBottom: tab === t.key ? '2px solid var(--accent-blue)' : '2px solid transparent',
+            boxShadow: tab === t.key ? 'inset 0 -2px 10px rgba(29, 92, 255, 0.2)' : 'none',
             transition: 'all 0.15s',
           }}>
             {t.icon} {t.label}
@@ -481,8 +563,8 @@ export default function ContestCreator() {
             </div>
           ) : (
             allContests.map(c => (
-              <div key={c.id} style={{ backgroundColor: '#080808', border: '1px solid #1a1a1a',
-                padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={c.id} style={{ backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)',
+                padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '8px' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
                     <span style={{ ...mono, fontSize: '0.85rem', color: 'var(--text-bright)', fontWeight: 600 }}>{c.name}</span>
@@ -530,13 +612,24 @@ export default function ContestCreator() {
               </div>
             ))
           )}
+          <button onClick={() => {
+            ContestStore.resetAndCreateDemoContests();
+          }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              padding: '12px', border: '1px dashed rgba(245,158,11,0.4)', backgroundColor: 'rgba(245,158,11,0.05)',
+              color: '#f59e0b', cursor: 'pointer', ...mono, fontSize: '0.75rem', borderRadius: '8px',
+              transition: 'all 0.15s', marginTop: '12px' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(245,158,11,0.4)'; e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.05)'; }}>
+            <Trophy size={14} /> RESET & CREATE 2 DEMO CONTESTS
+          </button>
           <button onClick={() => setTab('create')}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-              padding: '12px', border: '1px dashed #222', background: 'transparent',
-              color: '#555', cursor: 'pointer', ...mono, fontSize: '0.75rem',
+              padding: '12px', border: '1px dashed rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.02)',
+              color: 'var(--text-bright)', cursor: 'pointer', ...mono, fontSize: '0.75rem', borderRadius: '8px',
               transition: 'all 0.15s', marginTop: '4px' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.color = '#f59e0b'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = '#222'; e.currentTarget.style.color = '#555'; }}>
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-blue)'; e.currentTarget.style.color = 'var(--accent-blue)'; e.currentTarget.style.backgroundColor = 'rgba(29, 92, 255, 0.05)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'var(--text-bright)'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)'; }}>
             <Plus size={14} /> CREATE NEW CONTEST
           </button>
         </div>
@@ -546,15 +639,15 @@ export default function ContestCreator() {
       {tab === 'create' && (
         <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Contest meta */}
-          <div style={{ backgroundColor: '#080808', border: '1px solid #1a1a1a', padding: '20px',
+          <div style={{ backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px',
             display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div style={{ ...mono, fontSize: '0.65rem', color: '#f59e0b', letterSpacing: '2px' }}>CONTEST DETAILS</div>
+            <div style={{ ...mono, fontSize: '0.65rem', color: 'var(--accent-blue)', letterSpacing: '2px' }}>CONTEST DETAILS</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
               <div>
                 <div style={labelStyle}>CONTEST NAME</div>
                 <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   style={inputStyle} placeholder="e.g. IICPC Prosperity 2027"
-                  onFocus={e => e.target.style.borderColor = '#f59e0b'}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent-blue)'}
                   onBlur={e => e.target.style.borderColor = '#1a1a1a'} />
               </div>
               <div>
@@ -562,7 +655,7 @@ export default function ContestCreator() {
                 <input type="datetime-local" value={form.endsAt}
                   onChange={e => setForm(f => ({ ...f, endsAt: e.target.value }))}
                   style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = '#f59e0b'}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent-blue)'}
                   onBlur={e => e.target.style.borderColor = '#1a1a1a'} />
               </div>
             </div>
@@ -572,7 +665,7 @@ export default function ContestCreator() {
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 style={{ ...inputStyle, height: 70, resize: 'vertical', lineHeight: 1.5 }}
                 placeholder="Describe the contest goals, difficulty, and theme..."
-                onFocus={e => e.target.style.borderColor = '#f59e0b'}
+                onFocus={e => e.target.style.borderColor = 'var(--accent-blue)'}
                 onBlur={e => e.target.style.borderColor = '#1a1a1a'} />
             </div>
             <div>
@@ -580,7 +673,7 @@ export default function ContestCreator() {
               <input type="number" value={form.maxParticipants}
                 onChange={e => setForm(f => ({ ...f, maxParticipants: parseInt(e.target.value) }))}
                 style={{ ...inputStyle, width: 120 }}
-                onFocus={e => e.target.style.borderColor = '#f59e0b'}
+                onFocus={e => e.target.style.borderColor = 'var(--accent-blue)'}
                 onBlur={e => e.target.style.borderColor = '#1a1a1a'} />
             </div>
           </div>
@@ -596,13 +689,13 @@ export default function ContestCreator() {
               onDelete={() => deleteRound(i)} />
           ))}
           <button onClick={addRound} style={{
-            padding: '10px', border: '1px dashed #1a1a1a', background: 'transparent',
-            color: '#444', cursor: 'pointer', ...mono, fontSize: '0.7rem',
+            padding: '10px', border: '1px dashed rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.02)',
+            color: 'var(--text-bright)', cursor: 'pointer', ...mono, fontSize: '0.7rem', borderRadius: '8px',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
             transition: 'all 0.15s',
           }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = '#a855f7'; e.currentTarget.style.color = '#a855f7'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.color = '#444'; }}>
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-blue)'; e.currentTarget.style.color = 'var(--accent-blue)'; e.currentTarget.style.backgroundColor = 'rgba(29, 92, 255, 0.05)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'var(--text-bright)'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)'; }}>
             <Plus size={13} /> ADD ROUND
           </button>
 
@@ -648,7 +741,7 @@ export default function ContestCreator() {
             ))}
           </div>
           {monitorTarget ? (
-            <MonitorPanel contest={ContestStore.getContest(monitorTarget)} />
+            <MonitorPanel contest={ContestStore.getContest(monitorTarget)} telemetry={storeState.telemetry} />
           ) : (
             <div style={{ color: '#333', textAlign: 'center', padding: '60px', ...mono, fontSize: '0.8rem' }}>
               Select a contest to monitor.
@@ -657,39 +750,29 @@ export default function ContestCreator() {
         </div>
       )}
 
-      {/* ── Tab: CUSTOM BOTS ────────────────────────────────────────────── */}
+      {/* ── Tab: BOT SWARM ─────────────────────────────────────────────────── */}
       {tab === 'bots' && (
         <div style={{ maxWidth: 860, display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div style={{ backgroundColor: '#080808', border: '1px dashed #333', padding: '40px', textAlign: 'center', borderRadius: '8px' }}>
-            <Bot size={48} color="#a855f7" style={{ marginBottom: '16px' }} />
-            <h3 style={{ ...mono, color: 'var(--text-bright)', marginBottom: '8px' }}>Upload Custom GM Bot</h3>
-            <p style={{ ...mono, color: '#555', fontSize: '0.8rem', marginBottom: '24px' }}>
-              Drag and drop a .py bot script here, or click to select a file.
+          <div style={{ backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.05)', padding: '30px', borderRadius: '8px' }}>
+            <h3 style={{ ...mono, color: 'var(--text-bright)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Bot size={20} color="var(--accent-blue)" /> C++ Bot Swarm (Game Master Engine)
+            </h3>
+            <p style={{ ...mono, color: '#888', fontSize: '0.8rem', lineHeight: 1.6, marginBottom: '24px' }}>
+              Project Vidhi Arena operates an ultra-low latency (ULL) C++ market simulator. To maintain zero-IPC overhead, the Game Master deploys highly optimized, pre-compiled C++ bot strategies. These strategies run inline on the same NUMA node as the persistent LOB, reacting in ~10ns.
+              <br/><br/>
+              <b>Python scripts are NOT supported for the Bot Swarm</b> to prevent massive latency regressions. Use the Round Builder to configure the aggressiveness and active bots for each contest phase.
             </p>
-            <label style={{ ...inputStyle, display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', width: 'auto', backgroundColor: '#a855f720', color: '#a855f7', border: '1px solid #a855f7' }}>
-              <Upload size={16} /> SELECT .PY FILE
-              <input type="file" accept=".py" style={{ display: 'none' }} onChange={async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const text = await file.text();
-                const name = file.name.replace('.py', '').toUpperCase();
-                ContestStore.addCustomBot(name, text);
-                e.target.value = '';
-              }} />
-            </label>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '16px' }}>
-            {(storeState.customBots || []).map(b => (
-              <div key={b.id} style={{ backgroundColor: '#050505', border: '1px solid #1a1a1a', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ ...mono, color: '#10b981', fontWeight: 600 }}>{b.name}</span>
-                  <button onClick={() => ContestStore.removeCustomBot(b.id)} style={{ background: 'transparent', border: 'none', color: '#e11d48', cursor: 'pointer' }}>
-                    <Trash2 size={14} />
-                  </button>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+            {BOT_OPTS.map(b => (
+              <div key={b.id} style={{ backgroundColor: '#0D0F12', border: `1px solid ${b.color}40`, padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: b.color }} />
+                  <span style={{ ...mono, color: 'var(--text-bright)', fontWeight: 600 }}>{b.name} ({b.id})</span>
                 </div>
-                <div style={{ ...mono, fontSize: '0.65rem', color: '#555', maxHeight: '100px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {b.code.substring(0, 150)}...
+                <div style={{ ...mono, fontSize: '0.75rem', color: '#555', lineHeight: 1.4 }}>
+                  {b.desc}
                 </div>
               </div>
             ))}

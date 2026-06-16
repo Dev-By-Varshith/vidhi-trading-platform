@@ -4,9 +4,10 @@
 // This shows: your PnL% vs other students' submitted PnL% for this contest.
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Trophy, TrendingUp, TrendingDown, Zap, Award, Users, Info } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, Zap, Award, Users, Info, Crown, ChevronDown } from 'lucide-react';
 import ContestStore from '../store/ContestStore';
 import VidhiEngine from '../engine/VidhiEngine';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 // ─── Canvas sparkline ─────────────────────────────────────────────────────────
 function MiniChart({ vals = [], color = '#10b981', w = 100, h = 28 }) {
@@ -31,13 +32,16 @@ function MiniChart({ vals = [], color = '#10b981', w = 100, h = 28 }) {
 
 // ─── Rank badge ───────────────────────────────────────────────────────────────
 function Rank({ n }) {
-  const c = { 1: '#f59e0b', 2: '#94a3b8', 3: '#cd7c2e' };
+  if (n === 1) return <Crown size={22} color="#FFD700" fill="#FFD700" style={{ filter: 'drop-shadow(0 0 4px rgba(255, 215, 0, 0.6))' }} />;
+  if (n === 2) return <Crown size={22} color="#C0C0C0" fill="#C0C0C0" style={{ filter: 'drop-shadow(0 0 4px rgba(192, 192, 192, 0.4))' }} />;
+  if (n === 3) return <Crown size={22} color="#CD7C2E" fill="#CD7C2E" style={{ filter: 'drop-shadow(0 0 4px rgba(205, 124, 46, 0.4))' }} />;
+  
   return (
     <div style={{ width: 26, height: 26, borderRadius: '50%', display: 'flex',
       alignItems: 'center', justifyContent: 'center',
       fontFamily: "'Roboto Mono', monospace", fontSize: '0.72rem', fontWeight: 700,
-      backgroundColor: c[n] ? c[n] + '20' : 'transparent',
-      border: `1px solid ${c[n] || '#222'}`, color: c[n] || '#444' }}>
+      backgroundColor: 'transparent',
+      border: `1px solid #444`, color: '#666' }}>
       {n}
     </div>
   );
@@ -127,6 +131,19 @@ export default function Leaderboard() {
   const [pulse,       setPulse]       = useState(false);
   const [backendRows, setBackendRows] = useState([]);  // from /api/leaderboard
   const [backendOnline, setBackendOnline] = useState(false);
+  const [activeFilter, setActiveFilter] = useState('main'); // 'main', or `${round.id}-test`, `${round.id}-final`
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (location.state?.autoReturn) {
+      const t = setTimeout(() => {
+        navigate('/');
+      }, 8000);
+      return () => clearTimeout(t);
+    }
+  }, [location.state, navigate]);
 
   useEffect(() => {
     const unsubStore  = ContestStore.subscribe(s => setStoreState({ ...s }));
@@ -142,8 +159,11 @@ export default function Leaderboard() {
     // Poll real leaderboard from backend every 10s
     let interval = null;
     async function fetchLB() {
-      const activeRoundId = ContestStore.getActiveRoundId();
-      const url = activeRoundId ? `/api/leaderboard?round_id=${activeRoundId}` : '/api/leaderboard';
+      let url = '/api/leaderboard';
+      if (activeFilter !== 'main') {
+        const [rid, phase] = activeFilter.split('-phase-');
+        url = `/api/leaderboard?round_id=${rid}&phase=${phase}`;
+      }
       fetch(url)
         .then(res => res.ok ? res.json() : null)
         .then(data => {
@@ -172,7 +192,7 @@ export default function Leaderboard() {
       unsubStatus();
       if (interval) clearInterval(interval);
     };
-  }, []);
+  }, [activeFilter]);
 
   const contestId   = storeState.activeContestId;
   const contest     = contestId ? ContestStore.getContest(contestId) : null;
@@ -182,6 +202,17 @@ export default function Leaderboard() {
   const entries = backendRows.length > 0 ? backendRows : localEntries;
 
   const activeRound = contest?.rounds?.find(r => r.status === 'active');
+
+  // Build filter options
+  const filterOptions = [{ id: 'main', label: 'Main Leaderboard' }];
+  if (contest?.rounds) {
+    contest.rounds.forEach(r => {
+      filterOptions.push({ id: `${r.id}-phase-test`, label: `${r.name} - Test Results` });
+      filterOptions.push({ id: `${r.id}-phase-final`, label: `${r.name} - Final Results` });
+    });
+  }
+
+  const activeFilterLabel = filterOptions.find(o => o.id === activeFilter)?.label || 'Main Leaderboard';
 
   // My entry
   const myId = storeState.studentId || 'me';
@@ -203,17 +234,57 @@ export default function Leaderboard() {
           <span style={{ color: 'var(--text-bright)', fontFamily: "'Roboto Mono', monospace",
             fontSize: '0.85rem', letterSpacing: '2px' }}>STUDENT LEADERBOARD</span>
         </div>
-        <div style={{ display: 'flex', gap: '20px', fontFamily: "'Roboto Mono', monospace", fontSize: '0.7rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', fontFamily: "'Roboto Mono', monospace", fontSize: '0.7rem' }}>
           <span style={{ color: '#555' }}>
             {contest ? contest.name : 'No active contest'}
           </span>
-          {activeRound && (
-            <span style={{ color: '#a855f7' }}>
-              ● {activeRound.name.split('—')[0].trim()}
-            </span>
+          {contest && (
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  backgroundColor: '#161920', border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'var(--accent-blue)', padding: '6px 12px', borderRadius: '4px',
+                  cursor: 'pointer', fontFamily: "'Roboto Mono', monospace", fontSize: '0.7rem'
+                }}
+              >
+                {activeFilterLabel}
+                <ChevronDown size={14} />
+              </button>
+              {filterDropdownOpen && (
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, marginTop: '4px',
+                  backgroundColor: '#0D0F12', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '6px', overflow: 'hidden', zIndex: 100, minWidth: '200px',
+                  boxShadow: '0 8px 16px rgba(0,0,0,0.8)'
+                }}>
+                  {filterOptions.map(opt => (
+                    <div 
+                      key={opt.id}
+                      onClick={() => { setActiveFilter(opt.id); setFilterDropdownOpen(false); }}
+                      style={{
+                        padding: '10px 14px', cursor: 'pointer',
+                        backgroundColor: activeFilter === opt.id ? 'rgba(29, 92, 255, 0.1)' : 'transparent',
+                        color: activeFilter === opt.id ? 'var(--accent-blue)' : 'var(--text-bright)',
+                        borderBottom: '1px solid rgba(255,255,255,0.03)'
+                      }}
+                    >
+                      {opt.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
+
+      {location.state?.autoReturn && (
+        <div style={{ backgroundColor: 'rgba(29, 92, 255, 0.1)', border: '1px solid var(--accent-blue)', color: '#fff', padding: '12px', borderRadius: '6px', textAlign: 'center', fontSize: '0.85rem' }}>
+          Displaying your ranking in the global pool. Automatically returning to the code arena in a few seconds...
+        </div>
+      )}
 
       {/* ── Bots note ──────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px',

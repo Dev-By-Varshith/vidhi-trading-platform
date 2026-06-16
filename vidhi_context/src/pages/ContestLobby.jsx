@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trophy, Clock, Users, ChevronRight, Play, Lock, CheckCircle, Circle, Zap, LogOut, Download } from 'lucide-react';
+import { Trophy, Clock, Users, ChevronRight, Play, Lock, CheckCircle, Circle, Zap, LogOut, Download, AlertTriangle, FileText, Bot } from 'lucide-react';
 import ContestStore from '../store/ContestStore';
 import { getDataset } from '../utils/idb';
 
@@ -75,11 +75,11 @@ function ContestCard({ contest, isJoined, onJoin }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        backgroundColor: '#080808',
-        border: `1px solid ${hovered ? (isJoined ? '#a855f7' : '#333') : '#1a1a1a'}`,
+        backgroundColor: '#0D0F12',
+        border: `1px solid ${hovered ? (isJoined ? 'var(--accent-blue)' : 'rgba(255,255,255,0.15)') : 'rgba(255,255,255,0.05)'}`,
         padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px',
         transition: 'border-color 0.2s, background-color 0.2s',
-        backgroundColor: hovered ? '#0a0a0a' : '#080808',
+        borderRadius: '8px',
         cursor: 'pointer',
         position: 'relative', overflow: 'hidden',
       }}
@@ -110,7 +110,7 @@ function ContestCard({ contest, isJoined, onJoin }) {
           <StatusBadge status={contest.status} />
           {isJoined && (
             <span style={{
-              color: '#a855f7', fontSize: '0.6rem',
+              color: 'var(--accent-blue)', fontSize: '0.6rem',
               fontFamily: "'Roboto Mono', monospace", letterSpacing: '1px'
             }}>✓ JOINED</span>
           )}
@@ -118,21 +118,21 @@ function ContestCard({ contest, isJoined, onJoin }) {
       </div>
 
       {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', backgroundColor: '#111' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
         {[
           { label: 'ROUNDS', value: rounds.length },
           { label: 'PARTICIPANTS', value: (contest.participants || []).length },
           { label: 'TIME LEFT', value: daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h` },
           { label: 'ACTIVE ROUND', value: activeRound ? activeRound.name.split('—')[0].trim() : 'None' },
         ].map(s => (
-          <div key={s.label} style={{ backgroundColor: '#050505', padding: '10px 12px' }}>
+          <div key={s.label} style={{ backgroundColor: '#11141A', padding: '10px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{
-              color: '#444', fontSize: '0.55rem',
+              color: 'var(--text-secondary)', fontSize: '0.6rem',
               fontFamily: "'Roboto Mono', monospace", letterSpacing: '1px', marginBottom: '3px'
             }}>{s.label}</div>
             <div style={{
-              color: 'var(--text-bright)', fontFamily: "'Roboto Mono', monospace",
-              fontSize: '0.8rem', fontWeight: 600
+              color: 'var(--accent-green)', fontFamily: "'Roboto Mono', monospace",
+              fontSize: '0.9rem', fontWeight: 700
             }}>{s.value}</div>
           </div>
         ))}
@@ -177,16 +177,22 @@ function ContestCard({ contest, isJoined, onJoin }) {
                 onClick={async () => {
                   try {
                     const csvData = await getDataset(activeRound.testDataKey);
-                    if (!csvData) {
-                      alert('Dataset not found locally. GM must upload it first.');
+                    if (csvData) {
+                      const blob = new Blob([csvData], { type: 'text/csv' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = activeRound.testDataName;
+                      a.click();
+                      URL.revokeObjectURL(url);
                       return;
                     }
-                    const blob = new Blob([csvData], { type: 'text/csv' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = activeRound.testDataName;
-                    a.click();
+
+                    const fallbackName = activeRound.dataset_path
+                      || activeRound.testDataKey?.replace(/\.csv$/i, '.bin')
+                      || 'public_99k.bin';
+                    const apiBase = import.meta.env.VITE_API_URL || '';
+                    window.open(`${apiBase}/api/datasets/${encodeURIComponent(fallbackName)}`, '_blank');
                   } catch (err) {
                     console.error('Failed to download dataset:', err);
                   }
@@ -209,26 +215,39 @@ function ContestCard({ contest, isJoined, onJoin }) {
       {/* CTA */}
       <div style={{ display: 'flex', gap: '8px' }}>
         {isJoined ? (
-          <button onClick={() => navigate('/')} className="btn-primary" style={{ flex: 1 }}>
-            <Play size={12} fill="currentColor" /> OPEN CODE ARENA
+          <button onClick={() => navigate('/')} className="btn-primary" style={{ flex: 1, backgroundColor: 'var(--accent-blue)', color: '#fff', borderRadius: '6px', padding: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(29, 92, 255, 0.3)', transition: 'transform 0.2s', fontWeight: 600 }}
+            onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+            onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+            <Play size={14} fill="currentColor" /> ENTER CODE ARENA
           </button>
         ) : (
-          <button onClick={() => onJoin(contest.id)}
+          <button onClick={() => onJoin(contest)}
             disabled={contest.status !== 'active'}
             style={{
-              flex: 1, padding: '10px', backgroundColor: 'transparent',
-              border: `1px solid ${contest.status !== 'active' ? 'var(--border-glass)' : 'var(--text-bright)'}`,
+              flex: 1, padding: '10px', backgroundColor: contest.status === 'active' ? 'rgba(29, 92, 255, 0.1)' : 'transparent',
+              border: `1px solid ${contest.status !== 'active' ? 'var(--border-glass)' : 'var(--accent-blue)'}`,
               color: contest.status !== 'active' ? 'var(--text-dim)' : 'var(--text-bright)',
               cursor: contest.status !== 'active' ? 'not-allowed' : 'pointer',
               fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.5px',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-              transition: 'all 0.15s', borderRadius: '4px'
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)', borderRadius: '6px',
+              boxShadow: contest.status === 'active' ? '0 0 10px rgba(29, 92, 255, 0.15)' : 'none'
             }}
-            onMouseEnter={e => contest.status === 'active' && (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)')}
-            onMouseLeave={e => contest.status === 'active' && (e.currentTarget.style.backgroundColor = 'transparent')}
+            onMouseEnter={e => {
+              if (contest.status === 'active') {
+                e.currentTarget.style.backgroundColor = 'var(--accent-blue)';
+                e.currentTarget.style.boxShadow = '0 0 16px rgba(29, 92, 255, 0.4)';
+              }
+            }}
+            onMouseLeave={e => {
+              if (contest.status === 'active') {
+                e.currentTarget.style.backgroundColor = 'rgba(29, 92, 255, 0.1)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(29, 92, 255, 0.15)';
+              }
+            }}
           >
-            {contest.status === 'ended' ? <Lock size={12} /> : contest.status === 'upcoming' ? <Clock size={12} /> : <ChevronRight size={12} />}
-            {contest.status === 'ended' ? 'CONTEST ENDED' : contest.status === 'upcoming' ? 'STARTS SOON' : 'JOIN CONTEST'}
+            {contest.status === 'ended' ? <Lock size={14} /> : contest.status === 'upcoming' ? <Clock size={14} /> : <ChevronRight size={14} />}
+            {contest.status === 'ended' ? 'CONTEST ENDED' : contest.status === 'upcoming' ? 'STARTS SOON' : 'JOIN ARENA'}
           </button>
         )}
       </div>
@@ -240,14 +259,21 @@ function ContestCard({ contest, isJoined, onJoin }) {
 export default function ContestLobby() {
   const navigate = useNavigate();
   const [storeState, setStoreState] = useState(ContestStore.state);
+  const [selectedContestToJoin, setSelectedContestToJoin] = useState(null);
 
   useEffect(() => {
     return ContestStore.subscribe(s => setStoreState({ ...s }));
   }, []);
 
-  const handleJoin = (contestId) => {
-    ContestStore.joinContest(contestId);
-    navigate('/');
+  const handleJoinClick = (contest) => {
+    setSelectedContestToJoin(contest);
+  };
+
+  const confirmJoin = () => {
+    if (selectedContestToJoin) {
+      ContestStore.joinContest(selectedContestToJoin.id);
+      navigate('/');
+    }
   };
 
   const handleLeave = () => {
@@ -264,19 +290,20 @@ export default function ContestLobby() {
 
   return (
     <div style={{
-      width: '100vw', height: '100vh', backgroundColor: '#000',
+      width: '100vw', height: '100vh', backgroundColor: '#0A0B0D',
       overflowY: 'auto', padding: '32px', boxSizing: 'border-box'
     }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <Zap size={20} color="#a855f7" />
           <div>
             <div style={{
-              color: 'var(--text-bright)', fontFamily: "'Roboto Mono', monospace",
-              fontSize: '0.9rem', letterSpacing: '3px'
-            }}>CONTEST LOBBY</div>
+              color: '#fff', fontWeight: 600, fontSize: '1.2rem', letterSpacing: '-0.2px', display: 'flex', alignItems: 'center'
+            }}>
+              <img src="/logo.png" alt="Vidhi Arena" style={{ height: '30px', objectFit: 'contain' }} /> 
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 400, marginLeft: '8px' }}>/ Lobby</span>
+            </div>
             <div style={{
               color: '#555', fontFamily: "'Roboto Mono', monospace",
               fontSize: '0.65rem', marginTop: '2px'
@@ -352,11 +379,82 @@ export default function ContestLobby() {
               key={c.id}
               contest={c}
               isJoined={storeState.activeContestId === c.id}
-              onJoin={handleJoin}
+              onJoin={handleJoinClick}
             />
           ))
         )}
       </div>
+
+      {/* ─── PRE-CONTEST INFO MODAL ────────────────────────────────── */}
+      {selectedContestToJoin && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            width: '600px', backgroundColor: 'rgba(13, 15, 18, 0.95)', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '12px', padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.02) inset'
+          }}>
+            <div>
+              <h2 style={{ color: '#fff', margin: '0 0 8px 0', fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Zap color="var(--accent-blue)" /> Mission Briefing
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem', lineHeight: 1.5 }}>
+                You are about to enter the active arena for <strong>{selectedContestToJoin.name}</strong>. Please review the current environmental conditions and adversary landscape before proceeding.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div style={{ backgroundColor: '#11141A', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', marginBottom: '12px', fontWeight: 600 }}>
+                  <FileText size={16} color="var(--accent-green)" /> Market Data
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <strong>Public Sandbox:</strong> 100,000 Ticks<br/>
+                  <strong>Final Evaluation:</strong> 1,000,000 Ticks
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: '#11141A', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', marginBottom: '12px', fontWeight: 600 }}>
+                  <Bot size={16} color="#FF9500" /> Adversary Bots
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {selectedContestToJoin.rounds?.find(r => r.status === 'active')?.activeBots?.map(b => (
+                    <span key={b} style={{ backgroundColor: 'rgba(255,149,0,0.1)', color: '#FF9500', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontFamily: "'Roboto Mono', monospace" }}>{b}</span>
+                  )) || <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No active bots in this round.</span>}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: 'rgba(29, 92, 255, 0.1)', border: '1px solid rgba(29, 92, 255, 0.2)', borderRadius: '8px' }}>
+              <AlertTriangle size={20} color="var(--accent-blue)" />
+              <span style={{ color: '#fff', fontSize: '0.85rem' }}>Once you deploy your algorithm, it will compete directly with these bots to optimize PnL. Good luck!</span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+              <button 
+                onClick={() => setSelectedContestToJoin(null)}
+                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmJoin}
+                style={{ background: 'var(--accent-blue)', border: 'none', color: '#fff', padding: '10px 32px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(29,92,255,0.3)' }}
+              >
+                <Play size={14} fill="currentColor" /> ENTER ARENA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      `}} />
     </div>
   );
 }

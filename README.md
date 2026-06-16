@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="vidhi_context/public/logo.png" alt="Vidhi Arena Logo" width="300" />
+</div>
+
 # Vidhi Arena v5.0
 
 Vidhi Arena is a high-performance, containerized algorithmic trading simulation platform designed for the IICPC Prosperity hackathon. It evaluates user-submitted Python trading algorithms against an unyielding C++ Game Master and Limit Order Book (LOB) with extreme precision.
