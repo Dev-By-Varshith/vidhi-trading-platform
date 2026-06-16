@@ -536,30 +536,45 @@ class ContestantRunner {
       const pfx = ' '.repeat(indent);
 
       if (isElif) {
-        // Close previous if/elif block, open new else-if
         const cond = line.replace(/^elif\s+/, '').replace(/:$/, '').trim();
-        out.push(`${pfx}} else if (${cond}) {`);
+        if (out.length > 0 && out[out.length - 1].trim() === '}') {
+          out[out.length - 1] = out[out.length - 1] + ` else if (${cond}) {`;
+        } else {
+          out.push(`${pfx}} else if (${cond}) {`);
+        }
         prevWasBlockOpen = true;
-        if (indentStack[indentStack.length - 1] !== indent) indentStack.push(indent + 4);
+        indentStack.push(indent + 4);
         continue;
       }
       if (isElse) {
-        out.push(`${pfx}} else {`);
+        if (out.length > 0 && out[out.length - 1].trim() === '}') {
+          out[out.length - 1] = out[out.length - 1] + ' else {';
+        } else {
+          out.push(`${pfx}} else {`);
+        }
         prevWasBlockOpen = true;
-        if (indentStack[indentStack.length - 1] !== indent) indentStack.push(indent + 4);
+        indentStack.push(indent + 4);
         continue;
       }
       if (isExcept) {
         const spec = line.replace(/^except\s*/, '').replace(/:$/, '').trim();
-        out.push(`${pfx}} catch(${spec || '_e'}) {`);
+        if (out.length > 0 && out[out.length - 1].trim() === '}') {
+          out[out.length - 1] = out[out.length - 1] + ` catch(${spec || '_e'}) {`;
+        } else {
+          out.push(`${pfx}} catch(${spec || '_e'}) {`);
+        }
         prevWasBlockOpen = true;
-        if (indentStack[indentStack.length - 1] !== indent) indentStack.push(indent + 4);
+        indentStack.push(indent + 4);
         continue;
       }
       if (isFinally) {
-        out.push(`${pfx}} finally {`);
+        if (out.length > 0 && out[out.length - 1].trim() === '}') {
+          out[out.length - 1] = out[out.length - 1] + ' finally {';
+        } else {
+          out.push(`${pfx}} finally {`);
+        }
         prevWasBlockOpen = true;
-        if (indentStack[indentStack.length - 1] !== indent) indentStack.push(indent + 4);
+        indentStack.push(indent + 4);
         continue;
       }
 
