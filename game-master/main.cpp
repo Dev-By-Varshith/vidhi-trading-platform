@@ -123,9 +123,9 @@ int run_simulation(const Config& cfg) {
     // FIX #7: Use 2MB for hugepage backing (MAP_HUGETLB requires region ≥ 2MB).
     // The rendezvous struct is 1152B but we mmap 2MB so MADV_HUGEPAGE / MAP_HUGETLB can apply.
     static constexpr size_t SHM_SIZE = 2 * 1024 * 1024;  // 2MB
-    std::string shm_name = "/vidhi_run_" + cfg.run_id;
-    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR | O_TRUNC, 0666);
-    if (shm_fd < 0) { perror("shm_open"); return 1; }
+    std::string shm_name = "/tmp/vidhi_shm_" + cfg.run_id;
+    int shm_fd = open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) { perror("open"); return 1; }
     if (ftruncate(shm_fd, SHM_SIZE) < 0) { perror("ftruncate"); return 1; }
 
     // Try MAP_HUGETLB (2MB hugepage); fall back to regular mmap on systems without it

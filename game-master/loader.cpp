@@ -63,23 +63,23 @@ int main() {
     
     std::string shm_name;
     if (!run_id_str.empty()) {
-        shm_name = "/vidhi_run_" + run_id_str;
+        shm_name = "/tmp/vidhi_shm_" + run_id_str;
     } else {
-        shm_name = "/vidhi_arena"; // last-resort fallback for local testing
+        shm_name = "/tmp/vidhi_arena"; // last-resort fallback for local testing
     }
     std::cerr << "[LOADER] Connecting to SHM: " << shm_name << "\n";
     
     static constexpr size_t SHM_SIZE = 2 * 1024 * 1024; // MUST match GM's 2MB mmap
 
-    // Retry shm_open for up to 30 seconds — GM may create SHM after sandbox starts
+    // Retry open for up to 30 seconds — GM may create SHM after sandbox starts
     int fd = -1;
     for (int attempt = 0; attempt < 300; ++attempt) {
-        fd = shm_open(shm_name.c_str(), O_RDWR, 0666);
+        fd = open(shm_name.c_str(), O_RDWR, 0666);
         if (fd >= 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     if (fd < 0) {
-        std::cerr << "[LOADER] shm_open(" << shm_name << ") failed after 30s: " << strerror(errno) << "\n";
+        std::cerr << "[LOADER] open(" << shm_name << ") failed after 30s: " << strerror(errno) << "\n";
         return 1;
     }
     std::cerr << "[LOADER] SHM connected: " << shm_name << "\n";
