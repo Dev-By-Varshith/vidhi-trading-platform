@@ -189,7 +189,13 @@ export default function CodeArena() {
       }
 
       if (status === 'error' || status === 'tle') {
-        alert('Compilation or Engine Error: Check browser console or strategy logs for details.');
+        const runId = VidhiEngine.instance?.currentRunId;
+        if (runId) {
+            console.log("Failed run ID:", runId);
+            fetch(`/api/runs/${runId}/execution-log`).then(r => r.text()).then(t => console.error("EXECUTION LOG FROM AWS:", t));
+        }
+        const errorMsg = VidhiEngine.instance?.lastState?.errorMessage || VidhiEngine.instance?.lastState?.error || VidhiEngine.instance?.logHistory[VidhiEngine.instance.logHistory.length - 1]?.msg || 'Compilation or Engine Error';
+        alert('Simulation Error:\n\n' + errorMsg + '\n\nCheck browser console for more details.');
         hasNavigatedRef.current = false;
         setShowModal(false);
         startTimeRef.current = 0;

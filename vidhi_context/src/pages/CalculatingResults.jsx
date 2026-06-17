@@ -162,7 +162,10 @@ export default function CalculatingResults() {
             <div style={{ display: 'flex', gap: '2px', width: '100%', height: '24px' }}>
               {/* Fake visual diff array for the UI matrix presentation */}
               {Array.from({length: 100}).map((_, i) => {
-                const isFail = finalState?.violations > 0 && Math.random() < ((1-finalState?.correctness) * 2);
+                // Deterministic: spread failures evenly based on correctness + violations
+                const failThreshold = finalState?.violations > 0 ? (1 - (finalState?.correctness ?? 1)) : 0;
+                const stride = failThreshold > 0 ? Math.max(1, Math.round(1 / failThreshold)) : 999;
+                const isFail = failThreshold > 0 && (i % stride === 0);
                 return (
                   <div key={i} style={{ flex: 1, backgroundColor: isFail ? '#e11d48' : '#10b981', opacity: isFail ? 1 : 0.4 }} title={isFail ? `Drift detected at sequence chunk ${i}` : 'Match'} />
                 )

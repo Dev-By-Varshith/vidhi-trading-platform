@@ -1108,12 +1108,17 @@ func handleFinalEval(w http.ResponseWriter, r *http.Request) {
 		cacheRun(run)
 		persistRun(run)
 
+		// Fetch round's bot_config for final eval jobs
+		var roundBotCfg string
+		if db != nil {
+			db.QueryRowContext(r.Context(), `SELECT bot_config FROM rounds WHERE id=$1`, roundID).Scan(&roundBotCfg)
+		}
 		job := worker.RunJob{
 			RunID:     runID,
 			UserID:    userID,
 			SoPath:    soPath,
 			RoundID:   roundID,
-			BotConfig: "", // Step 3: Pass custom bot config to worker
+			BotConfig: roundBotCfg,
 			Retries:   0,
 		}
 		worker.Enqueue(redisClient, job)
@@ -1364,6 +1369,7 @@ func runPythonForge(script string, args ...string) (string, error) {
 	}
 	cmd := exec.Command(pyCmd, cmdArgs...)
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Dir(cfg.ForgeDir))
+	log.Printf("[DEBUG] runPythonForge executing: %s %v", pyCmd, cmdArgs)
 	out, err := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
 	if err != nil {
@@ -1418,6 +1424,7 @@ func dispatchToGameMaster(soPath, runID, roundID, botConfig string) (*GameMaster
 			"--ticks", ticks,
 			"--run-id", runID,
 			"--dataset", datasetPath,
+			"--bot-config", actualBotConfig,
 		)
 	} else {
 		cmd = exec.CommandContext(ctx, cfg.GameMasterBin,

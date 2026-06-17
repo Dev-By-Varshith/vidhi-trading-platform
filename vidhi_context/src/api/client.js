@@ -51,9 +51,10 @@ async function post(path, body) {
   return res.json();
 }
 
-async function get(path) {
+async function get(path, customBaseUrl = null) {
   const key = getApiKey();
-  const res = await fetch(BASE + path, {
+  const targetBase = customBaseUrl || BASE;
+  const res = await fetch(targetBase + path, {
     headers: key ? { 'X-API-Key': key } : {},
   });
   if (!res.ok) {
@@ -78,7 +79,7 @@ export async function checkBackendHealth() {
 
 // ─── Submit code for forge pipeline + GM execution ────────────────────────────
 // Returns { run_id, status, message }
-export async function submitCode(code, userId = 'anonymous', roundId = 'round1', isPractice = false, botConfig = '') {
+export async function submitCode(code, userId = 'anonymous', roundId = 'round1', isPractice = false, botConfig = '', customBaseUrl = null) {
   const form = new FormData();
   const blob = new Blob([code], { type: 'text/x-python' });
   form.append('code',    blob, 'trader.py');
@@ -88,7 +89,8 @@ export async function submitCode(code, userId = 'anonymous', roundId = 'round1',
   if (isPractice) form.append('is_practice', 'true');
 
   const key = getApiKey();
-  const res = await fetch(BASE + '/submit', {
+  const targetBase = customBaseUrl || BASE;
+  const res = await fetch(targetBase + '/submit', {
     method: 'POST',
     body:   form,
     headers: key ? { 'X-API-Key': key } : {},
@@ -106,14 +108,14 @@ export async function submitCode(code, userId = 'anonymous', roundId = 'round1',
 
 // ─── Poll run status until complete/error (max 10min) ─────────────────────────
 // Calls onProgress({ status, pnl, pnlPct, ... }) on each poll.
-export async function pollRunUntilDone(runId, onProgress, intervalMs = 2000) {
+export async function pollRunUntilDone(runId, onProgress, customBaseUrl = null, intervalMs = 2000) {
   const maxWaitMs = 10 * 60 * 1000;
   const start     = Date.now();
   const TERMINAL  = new Set(['complete', 'error', 'tle']);
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      const run = await get(`/runs/${runId}`);
+      const run = await get(`/runs/${runId}`, customBaseUrl);
       if (typeof onProgress === 'function') onProgress(run);
       if (TERMINAL.has(run.status)) return run;
     } catch (e) {

@@ -237,26 +237,28 @@ class VidhiEngine {
         // Depth is derived from the best bid/ask provided by the engine.
         // In a real HFT environment, depth is often sparse, so we synthesize 
         // a tight book around the best prices.
+        // bidDepth / askDepth come from the worker's real LOB snapshot.
+        // bid_vol_N and ask_vol_N are populated by the worker TICK_UPDATE payload.
         bidDepth: t.bid_price ? [
-          { price: t.bid_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 30) },
-          { price: t.bid_price - 0.01, volume: 80  + (t.tick_id % 20) },
-          { price: t.bid_price - 0.02, volume: 120 + (t.tick_id % 40) },
-          { price: t.bid_price - 0.03, volume: 200 + (t.tick_id % 60) },
-          { price: t.bid_price - 0.04, volume: 320 + (t.tick_id % 80) },
+          { price: t.bid_price,        volume: t.bid_vol_0 ?? 50  },
+          { price: t.bid_price - 0.01, volume: t.bid_vol_1 ?? 80  },
+          { price: t.bid_price - 0.02, volume: t.bid_vol_2 ?? 120 },
+          { price: t.bid_price - 0.03, volume: t.bid_vol_3 ?? 200 },
+          { price: t.bid_price - 0.04, volume: t.bid_vol_4 ?? 320 },
         ] : (prev.bidDepth ?? []),
         askDepth: t.ask_price ? [
-          { price: t.ask_price,        volume: 50  + (Math.abs(t.pos ?? 0) % 25) },
-          { price: t.ask_price + 0.01, volume: 80  + (t.tick_id % 15) },
-          { price: t.ask_price + 0.02, volume: 120 + (t.tick_id % 35) },
-          { price: t.ask_price + 0.03, volume: 200 + (t.tick_id % 55) },
-          { price: t.ask_price + 0.04, volume: 320 + (t.tick_id % 75) },
+          { price: t.ask_price,        volume: t.ask_vol_0 ?? 50  },
+          { price: t.ask_price + 0.01, volume: t.ask_vol_1 ?? 80  },
+          { price: t.ask_price + 0.02, volume: t.ask_vol_2 ?? 120 },
+          { price: t.ask_price + 0.03, volume: t.ask_vol_3 ?? 200 },
+          { price: t.ask_price + 0.04, volume: t.ask_vol_4 ?? 320 },
         ] : (prev.askDepth ?? []),
         botActivity: t.bot_activity || (Object.keys(prev.botActivity || {}).length > 0 ? prev.botActivity : {
-          BOT_MARKET_MAKER: Math.floor(Math.random() * 50 + Math.abs(t.pos || 0) * 0.4),
-          BOT_MOMENTUM: Math.floor(Math.random() * 30 + Math.abs(t.pos || 0) * 0.25),
-          BOT_MEAN_REVERSION: Math.floor(Math.random() * 20 + Math.abs(t.pos || 0) * 0.2),
-          BOT_NOISE: Math.floor(Math.random() * 10 + Math.abs(t.pos || 0) * 0.1),
-          BOT_SNIPER: Math.floor(Math.random() * 5 + Math.abs(t.pos || 0) * 0.05),
+          BOT_MARKET_MAKER:   0,
+          BOT_MOMENTUM:       0,
+          BOT_MEAN_REVERSION: 0,
+          BOT_NOISE:          0,
+          BOT_SNIPER:         0,
         }),
     };
     
@@ -290,6 +292,9 @@ class VidhiEngine {
       { type: 'module' }
     );
     this.worker.onmessage = (e) => this._handleLocalMessage(e.data);
+    this.worker.onerror = (err) => {
+      this._failBeforeRun('Worker crashed: ' + err.message);
+    };
   }
 
   _handleLocalMessage({ type, payload }) {
@@ -302,6 +307,7 @@ class VidhiEngine {
       this._log('[OK] ' + payload.message);
     }
     if (type === 'COMPILE_ERROR') {
+      this.lastState = { ...this.lastState, error: payload.error };
       this._setStatus('error');
       this._log('[ERROR] Compile failed: ' + payload.error);
     }
@@ -376,9 +382,8 @@ class VidhiEngine {
       await this._startBackendRun(code, { ...options, isPractice: !options.isFinal });
     } else {
       if (options.isFinal) {
-        this._setStatus('error');
-        this._log('[ERROR] Backend unreachable for Final Submission. Please check connectivity.');
-        this.isSimulating = false;
+        this._failBeforeRun('Backend unreachable for Final Submission. Please check connectivity.');
+        return;
       } else {
         this._startLocalRun(code, options);
       }
@@ -411,15 +416,22 @@ class VidhiEngine {
       const { autoProvisionApiKey } = await import('../api/client');
       await autoProvisionApiKey(userId);
 
+      // If this is a final submission, route it to the cloud API instead of the local dev API
+      const isFinalRun = !options.isPractice;
+      let targetUrl = null;
+      if (isFinalRun && import.meta.env.VITE_CLOUD_API_URL) {
+        targetUrl = import.meta.env.VITE_CLOUD_API_URL + '/api';
+      }
+
       let run_id;
       try {
-        const result = await submitCode(code, userId, roundId, options.isPractice, botConfig);
+        const result = await submitCode(code, userId, roundId, options.isPractice, botConfig, targetUrl);
         run_id = result.run_id;
       } catch (e) {
         if (e.message.includes('401') || e.message.includes('invalid or expired')) {
           this._log('[AUTH] API key expired, provisioning new one and retrying...');
           await autoProvisionApiKey(userId);
-          const retryResult = await submitCode(code, userId, roundId, options.isPractice, botConfig);
+          const retryResult = await submitCode(code, userId, roundId, options.isPractice, botConfig, targetUrl);
           run_id = retryResult.run_id;
         } else {
           throw e;
@@ -467,12 +479,10 @@ class VidhiEngine {
           };
           this.completeSubscribers.forEach(cb => cb(this.lastState));
         }
-      }).catch(e => this._log('[POLL] ' + e.message));
+      }, targetUrl).catch(e => this._log('[POLL] ' + e.message));
 
     } catch (e) {
-      this._setStatus('error');
-      this._log('[ERROR] Backend submit failed: ' + e.message);
-      this.isSimulating = false;
+      this._failBeforeRun('Backend submit failed: ' + e.message);
     }
   }
 
@@ -519,7 +529,14 @@ class VidhiEngine {
     this._initWorker();
     this.worker.postMessage({
       type: 'START_SIMULATION',
-      payload: { code, datasetKey, botConfig, ...options }
+      payload: {
+        code,
+        datasetKey,
+        botConfig,
+        basePrice: activeRound?.asset?.basePrice || activeRound?.basePrice || 1500,
+        assetName: activeRound?.asset?.name || activeRound?.assetName || 'VIDHI',
+        ...options
+      }
     });
   }
 

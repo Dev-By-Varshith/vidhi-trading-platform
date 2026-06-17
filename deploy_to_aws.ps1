@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # ─────────────────────────────────────────────────────────────────────────────
 # Vidhi Arena — AWS Deployment Script
 # Account: 042470866347 | Region: us-east-1
@@ -117,6 +117,6 @@ if ($ALB_DNS) {
 }
 Write-Host ""
 Write-Host "Next steps after DNS:"
-Write-Host "  1. Point your domain → ALB DNS (CNAME record)"
-Write-Host "  2. Request SSL cert in AWS ACM → add HTTPS listener to ALB"
-Write-Host "  3. Update frontend VITE_API_URL env var → git push → auto-redeploy"
+Write-Host "  1. Point your domain -> ALB DNS (CNAME record)"
+Write-Host "  2. Request SSL cert in AWS ACM -> add HTTPS listener to ALB"
+Write-Host "  3. Update frontend VITE_API_URL env var -> git push -> auto-redeploy"

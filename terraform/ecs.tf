@@ -40,7 +40,8 @@ resource "aws_ecs_task_definition" "backend" {
     portMappings = [{ containerPort = 8080 }]
     environment = [
       { name = "SQS_QUEUE_URL", value = aws_sqs_queue.submissions.url },
-      { name = "AWS_REGION",    value = "us-east-1" }
+      { name = "AWS_REGION",    value = "us-east-1" },
+      { name = "DISABLE_MLOCK", value = "1" }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -91,8 +92,9 @@ resource "aws_ecs_service" "backend" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-    security_groups = [aws_security_group.backend.id]
+    subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
+    security_groups  = [aws_security_group.backend.id]
+    assign_public_ip = true
   }
 
   load_balancer {

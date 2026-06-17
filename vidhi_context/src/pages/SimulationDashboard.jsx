@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BadgeCheck, Check, ChevronDown, LayoutGrid, MoreHorizontal, Search, Settings2, ShieldCheck, User, Maximize2, Minimize2 } from 'lucide-react';
 import { createChart, ColorType, LineSeries, HistogramSeries } from 'lightweight-charts';
 import VidhiEngine from '../engine/VidhiEngine';
+import ContestStore from '../store/ContestStore';
 
 // ─── Reusable Canvas Chart Component ──────────────────────────────────────────
 function LWChart({ data, color, height = 200, priceFormat = 'price', title = '' }) {
@@ -143,6 +144,12 @@ export default function SimulationDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [liveState, setLiveState] = useState(null);
 
+  // Active round for commodity label + dataset name
+  const activeContest = ContestStore.getActiveContest();
+  const activeRoundId = ContestStore.getActiveRoundId();
+  const activeRound   = activeContest?.rounds?.find(r => r.id === activeRoundId) || activeContest?.rounds?.[0] || null;
+  const commodityName = activeRound?.asset?.name || activeRound?.assetName || null;
+
   useEffect(() => {
     const unsub = VidhiEngine.subscribe(setLiveState);
     return () => unsub();
@@ -227,7 +234,10 @@ export default function SimulationDashboard() {
             borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
             border: '1px solid rgba(255,255,255,0.05)'
           }}>
-            {isFinalRound ? 'Production_1M' : 'Public_99k'} <ChevronDown size={14} />
+            {isFinalRound
+              ? (activeRound?.finalDataKey || 'Production_1M')
+              : (activeRound?.testDataKey || 'Public_99k')
+            } <ChevronDown size={14} />
           </span>
         </div>
         
@@ -290,10 +300,10 @@ export default function SimulationDashboard() {
                 <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: liveState?.done ? '#4ade80' : '#3b82f6', boxShadow: `0 0 8px ${liveState?.done ? '#4ade80' : '#3b82f6'}` }} />
                 <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.5px' }}>Simulation Status</span>
               </div>
-              <span style={{ 
-                color: 'var(--accent-blue)', fontSize: '0.7rem', backgroundColor: 'rgba(29,92,255,0.1)', 
-                padding: '3px 10px', borderRadius: '6px', fontWeight: 600, border: '1px solid rgba(29,92,255,0.2)'
-              }}>{isFinalRound ? 'PRODUCTION' : 'TEST CASE'}</span>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {commodityName && <span style={{ color: '#fbbf24', fontSize: '0.65rem', backgroundColor: 'rgba(251,191,36,0.1)', padding: '3px 10px', borderRadius: '6px', fontWeight: 700, border: '1px solid rgba(251,191,36,0.2)' }}>{commodityName}</span>}
+                <span style={{ color: 'var(--accent-blue)', fontSize: '0.7rem', backgroundColor: 'rgba(29,92,255,0.1)', padding: '3px 10px', borderRadius: '6px', fontWeight: 600, border: '1px solid rgba(29,92,255,0.2)' }}>{isFinalRound ? 'PRODUCTION' : 'TEST CASE'}</span>
+              </div>
             </div>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
               <div style={{ 
@@ -499,7 +509,15 @@ export default function SimulationDashboard() {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{liveState?.totalFills?.toLocaleString() || 0}</div>
-                <div style={{ color: 'var(--accent-green)', fontSize: '0.7rem' }}>+12.5%</div>
+                {(() => {
+                  const vh = liveState?.volumeHistory || [];
+                  if (vh.length < 2) return null;
+                  const prev = vh[vh.length - 2]?.value || 0;
+                  const curr = vh[vh.length - 1]?.value || 0;
+                  const pct  = prev > 0 ? ((curr - prev) / prev * 100).toFixed(1) : '0.0';
+                  const color = parseFloat(pct) >= 0 ? 'var(--accent-green)' : '#f87171';
+                  return <div style={{ color, fontSize: '0.7rem' }}>{parseFloat(pct) >= 0 ? '+' : ''}{pct}%</div>;
+                })()}
               </div>
             </div>
 
@@ -515,11 +533,18 @@ export default function SimulationDashboard() {
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {[
-                { label: 'Aggressive Taker', val: '42.5%', color: '#f87171' },
-                { label: 'Passive Maker', val: '57.5%', color: '#4ade80' },
-                { label: 'Mean Reversion', val: '12.8%', color: '#60a5fa' },
-              ].map((r, i) => (
+              {(() => {
+                const total = Object.values(botActivity).reduce((a, b) => a + b, 0) || 1;
+                const aggressiveTakerCount = (botActivity.BOT_MOMENTUM || 0) + (botActivity.BOT_SNIPER || 0);
+                const passiveMakerCount    = (botActivity.BOT_MARKET_MAKER || 0) + (botActivity.BOT_MEAN_REVERSION || 0);
+                const noiseCount           = (botActivity.BOT_NOISE || 0);
+                const fillRows = [
+                  { label: 'Aggressive Taker', val: `${((aggressiveTakerCount / total) * 100).toFixed(1)}%`, color: '#f87171' },
+                  { label: 'Passive Maker',    val: `${((passiveMakerCount    / total) * 100).toFixed(1)}%`, color: '#4ade80' },
+                  { label: 'Noise / Random',   val: `${((noiseCount           / total) * 100).toFixed(1)}%`, color: '#60a5fa' },
+                ];
+                return fillRows;
+              })().map((r, i) => (
                 <div 
                   key={i} 
                   style={{ 
