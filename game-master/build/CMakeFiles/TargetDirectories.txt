@@ -1,4 +1,5 @@
 /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/vidhi-gm.dir
+/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/vidhi-loader.dir
 /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/pgo-train.dir
 /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/vidhi-tests.dir
 /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles/test.dir

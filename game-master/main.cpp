@@ -377,11 +377,10 @@ int main(int argc, char** argv) {
     }
 
     // ── Deep Ultrathink: Pin memory to RAM to prevent page faults ──
-    if (!getenv("DISABLE_MLOCK")) {
-        if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-            perror("[WARNING] mlockall failed (run as root for extreme latency guarantees)");
-        }
-    }
+    // Disabled for AWS Fargate compatibility
+    // if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+    //     perror("[WARNING] mlockall failed (run as root for extreme latency guarantees)");
+    // }
 
     pin_to_core(cfg.gm_core);
     std::cerr << "[GM] Vidhi Arena v5.0 — " << cfg.run_id << std::endl;

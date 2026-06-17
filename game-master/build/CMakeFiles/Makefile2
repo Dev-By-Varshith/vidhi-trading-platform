@@ -64,6 +64,7 @@ CMAKE_BINARY_DIR = /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/bu
 
 # The main recursive "all" target.
 all: CMakeFiles/vidhi-gm.dir/all
+all: CMakeFiles/vidhi-loader.dir/all
 all: CMakeFiles/vidhi-tests.dir/all
 .PHONY : all
 
@@ -73,6 +74,7 @@ preinstall:
 
 # The main recursive "clean" target.
 clean: CMakeFiles/vidhi-gm.dir/clean
+clean: CMakeFiles/vidhi-loader.dir/clean
 clean: CMakeFiles/pgo-train.dir/clean
 clean: CMakeFiles/vidhi-tests.dir/clean
 .PHONY : clean
@@ -102,6 +104,32 @@ vidhi-gm: CMakeFiles/vidhi-gm.dir/rule
 CMakeFiles/vidhi-gm.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-gm.dir/build.make CMakeFiles/vidhi-gm.dir/clean
 .PHONY : CMakeFiles/vidhi-gm.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/vidhi-loader.dir
+
+# All Build rule for target.
+CMakeFiles/vidhi-loader.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles --progress-num=3,4 "Built target vidhi-loader"
+.PHONY : CMakeFiles/vidhi-loader.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/vidhi-loader.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/vidhi-loader.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles 0
+.PHONY : CMakeFiles/vidhi-loader.dir/rule
+
+# Convenience name for target.
+vidhi-loader: CMakeFiles/vidhi-loader.dir/rule
+.PHONY : vidhi-loader
+
+# clean rule for target.
+CMakeFiles/vidhi-loader.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/clean
+.PHONY : CMakeFiles/vidhi-loader.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/pgo-train.dir
@@ -136,7 +164,7 @@ CMakeFiles/pgo-train.dir/clean:
 CMakeFiles/vidhi-tests.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-tests.dir/build.make CMakeFiles/vidhi-tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-tests.dir/build.make CMakeFiles/vidhi-tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles --progress-num=3,4 "Built target vidhi-tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/varsh/IICPC_ALGO_TRADING_PLATFORM/game-master/build/CMakeFiles --progress-num=5,6 "Built target vidhi-tests"
 .PHONY : CMakeFiles/vidhi-tests.dir/all
 
 # Build rule for subdir invocation for target.

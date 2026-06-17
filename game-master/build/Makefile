@@ -185,6 +185,19 @@ vidhi-gm/fast:
 .PHONY : vidhi-gm/fast
 
 #=============================================================================
+# Target rules for targets named vidhi-loader
+
+# Build rule for target.
+vidhi-loader: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vidhi-loader
+.PHONY : vidhi-loader
+
+# fast build rule for target.
+vidhi-loader/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/build
+.PHONY : vidhi-loader/fast
+
+#=============================================================================
 # Target rules for targets named pgo-train
 
 # Build rule for target.
@@ -209,6 +222,30 @@ vidhi-tests: cmake_check_build_system
 vidhi-tests/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-tests.dir/build.make CMakeFiles/vidhi-tests.dir/build
 .PHONY : vidhi-tests/fast
+
+loader.o: loader.cpp.o
+.PHONY : loader.o
+
+# target to build an object file
+loader.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/loader.cpp.o
+.PHONY : loader.cpp.o
+
+loader.i: loader.cpp.i
+.PHONY : loader.i
+
+# target to preprocess a source file
+loader.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/loader.cpp.i
+.PHONY : loader.cpp.i
+
+loader.s: loader.cpp.s
+.PHONY : loader.s
+
+# target to generate assembly for a file
+loader.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vidhi-loader.dir/build.make CMakeFiles/vidhi-loader.dir/loader.cpp.s
+.PHONY : loader.cpp.s
 
 main.o: main.cpp.o
 .PHONY : main.o
@@ -273,7 +310,11 @@ help:
 	@echo "... test"
 	@echo "... pgo-train"
 	@echo "... vidhi-gm"
+	@echo "... vidhi-loader"
 	@echo "... vidhi-tests"
+	@echo "... loader.o"
+	@echo "... loader.i"
+	@echo "... loader.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
