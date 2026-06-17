@@ -296,7 +296,7 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, w.gmBin,
-		"--external-sandbox",
+		"--so", job.SoPath,
 		"--ticks",  ticks,
 		"--bot-config", actualBotConfig,
 		"--dataset", actualDataset,
@@ -467,6 +467,10 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	}()
 
 	if err != nil {
+		// Save the raw log for the contestant to download even if it fails
+		logPath := filepath.Join(w.soCache, job.RunID+".log")
+		os.WriteFile(logPath, []byte(stderr.String()), 0644)
+
 		if ctx.Err() == context.DeadlineExceeded || cmdCtx.Err() == context.DeadlineExceeded {
 			w.updateRunStatus(job.RunID, "tle", nil)
 			return fmt.Errorf("tle: GM timed out after 5 minutes")
@@ -486,6 +490,10 @@ func (w *Worker) processJob(ctx context.Context, job RunJob) error {
 	if result.Correctness < 0.99 {
 		log.Printf("[WORKER] Low correctness detected. GM JSON output: %s", string(jsonResult))
 	}
+
+	// Save the raw log for the contestant to download on success as well
+	logPath := filepath.Join(w.soCache, job.RunID+".log")
+	os.WriteFile(logPath, []byte(stderr.String()), 0644)
 
 	w.updateRunStatus(job.RunID, "complete", &result)
 

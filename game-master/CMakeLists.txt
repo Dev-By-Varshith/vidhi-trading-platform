@@ -61,6 +61,13 @@ else()
         -march=x86-64
     )
 
+    add_executable(vidhi-loader
+        loader.cpp
+    )
+    target_include_directories(vidhi-loader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(vidhi-loader PRIVATE dl pthread rt)
+    target_compile_options(vidhi-loader PRIVATE -Wall -Wextra -march=x86-64)
+
     # ─── Deep Ultrathink: Profile-Guided Optimization (PGO) ────────────────
     # Step 1: Generate profiling build
     add_custom_target(pgo-train

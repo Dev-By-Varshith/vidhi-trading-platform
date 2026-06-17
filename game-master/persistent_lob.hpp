@@ -206,6 +206,10 @@ public:
     int64_t   last_trade_fp  = 0;
     int64_t   total_fills    = 0;
 
+    PersistentLOB() {
+        init();
+    }
+
     // ─── Init ─────────────────────────────────────────────────────────────────
     void init() {
         pool.init();

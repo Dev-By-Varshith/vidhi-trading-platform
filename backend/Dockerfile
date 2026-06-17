@@ -22,13 +22,14 @@ COPY backend/forge/ ./forge/
 COPY backend/vidhi_sdk/ ./vidhi_sdk/
 COPY --from=go-builder /app/vidhi-control .
 COPY --from=cpp-builder /gm/build/vidhi-gm ./vidhi-gm
+COPY --from=cpp-builder /gm/build/vidhi-loader ./vidhi-loader
 COPY backend/data/ ./data/
 # Don't try to copy libstdc++.so.6 from builder, just install it via apt to avoid missing path errors
 RUN apt-get update && apt-get install -y --no-install-recommends \
         binutils file gcc g++ python3-dev libstdc++6 \
     && pip install --no-cache-dir -r forge/requirements.txt \
     && rm -rf /var/lib/apt/lists/* \
-    && chmod +x ./vidhi-gm \
+    && chmod +x ./vidhi-gm ./vidhi-loader \
     && mkdir -p /tmp/vidhi/so /uploads/so
 
 EXPOSE 8080
