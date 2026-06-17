@@ -11,7 +11,7 @@ COPY game-master/ .
 RUN apt-get update && apt-get install -y --no-install-recommends g++ make cmake && rm -rf /var/lib/apt/lists/* \
     && rm -rf build CMakeCache.txt CMakeFiles \
     && cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -march=x86-64 -std=c++20 -DVIDHI_NATIVE_BUILD" \
-    && cmake --build build --target vidhi-gm --parallel $(nproc)
+    && cmake --build build --parallel $(nproc)
 
 # ── Stage 3: Final runtime image (Go + C++ binary + Python/Numba forge) ──────
 FROM python:3.11-slim-bookworm
