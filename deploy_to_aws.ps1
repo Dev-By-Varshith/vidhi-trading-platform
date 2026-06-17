@@ -18,7 +18,7 @@ Write-Host "╚═════════════════════�
 # ── STEP 1: Create ECR Repositories ──────────────────────────────────────────
 Write-Host "[1/7] Creating ECR repositories..." -ForegroundColor Yellow
 
-foreach ($repo in @("vidhi-engine-backend","vidhi-engine-sandbox-manager","vidhi-engine-frontend","vidhi-sandbox")) {
+foreach ($repo in @("vidhi-backend","vidhi-engine-sandbox-manager","vidhi-engine-frontend","vidhi-sandbox")) {
     $exists = aws ecr describe-repositories --repository-names $repo --region $REGION 2>$null
     if ($LASTEXITCODE -ne 0) {
         aws ecr create-repository --repository-name $repo --region $REGION | Out-Null
@@ -40,8 +40,8 @@ Set-Location (Split-Path $PSScriptRoot)
 
 # Backend (includes C++ Game Master compiled inside)
 Write-Host "  Building backend..."
-docker build -f backend/Dockerfile -t "${ECR}/vidhi-engine-backend:latest" .
-docker push "${ECR}/vidhi-engine-backend:latest"
+docker build -f backend/Dockerfile -t "${ECR}/vidhi-backend:latest" .
+docker push "${ECR}/vidhi-backend:latest"
 
 # Sandbox Manager
 Write-Host "  Building sandbox-manager..."

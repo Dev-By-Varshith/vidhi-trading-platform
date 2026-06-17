@@ -465,7 +465,12 @@ class ContestantRunner {
     try {
       const jsCode = this._transpile(code);
       // eslint-disable-next-line no-new-func
-      this.fn = new Function('state', 'orders', jsCode);
+      try {
+        this.fn = new Function('state', 'orders', jsCode);
+      } catch (err) {
+        console.error('JS Code that failed to compile:\n' + jsCode);
+        throw err;
+      }
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -618,7 +623,9 @@ class ContestantRunner {
       } else {
         // Regular statement — convert Python-specific syntax
         // print(...) → /* skip */ or console.log
-        line = line.replace(/^print\s*\(/, '/* print(').replace(/\)$/, ') */');
+        if (/^print\s*\(/.test(line)) {
+          line = line.replace(/^print\s*\(/, '/* print(').replace(/\)$/, ') */');
+        }
         // min/max built-ins are same in JS
         // abs → Math.abs
         line = line.replace(/\babs\s*\(/g, 'Math.abs(');

@@ -36,7 +36,7 @@ resource "aws_ecs_task_definition" "backend" {
   # Use the ECR repository URL
   container_definitions = jsonencode([{
     name  = "backend"
-    image = "042470866347.dkr.ecr.us-east-1.amazonaws.com/vidhi-backend:latest"
+    image = "042470866347.dkr.ecr.us-east-1.amazonaws.com/vidhi-engine-backend:latest"
     portMappings = [{ containerPort = 8080 }]
     environment = [
       { name = "SQS_QUEUE_URL", value = aws_sqs_queue.submissions.url },

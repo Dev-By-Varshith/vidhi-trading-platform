@@ -17,30 +17,34 @@ echo -e "╚══════════════════════�
 # ── STEP 1: Create ECR Repositories ──────────────────────────────────────────
 echo -e "\033[1;33m[1/7] Creating ECR repositories...\033[0m"
 
-REPOS=("vidhi-engine-backend" "vidhi-engine-sandbox-manager" "vidhi-engine-frontend" "vidhi-sandbox")
-for REPO in "${REPOS[@]}"; do
-    if aws ecr describe-repositories --repository-names "$REPO" --region "$REGION" >/dev/null 2>&1; then
-        echo "  · Already exists: $REPO"
-    else
-        aws ecr create-repository --repository-name "$REPO" --region "$REGION" >/dev/null
-        echo "  ✓ Created: $REPO"
-    fi
+for REPO in "vidhi-backend" "vidhi-engine-sandbox-manager" "vidhi-engine-frontend" "vidhi-sandbox"; do
+  if ! aws ecr describe-repositories --repository-names "$REPO" --region "$REGION" >/dev/null 2>&1; then
+    aws ecr create-repository --repository-name "$REPO" --region "$REGION" >/dev/null
+    echo "  ✓ Created: $REPO"
+  else
+    echo "  · Already exists: $REPO"
+  fi
 done
 
 # ── STEP 2: ECR Login ─────────────────────────────────────────────────────────
-echo -e "\n\033[1;33m[2/7] Authenticating Docker with ECR...\033[0m"
+echo -e "\n${YELLOW}[2/7] Authenticating Docker with ECR...${NC}"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR"
+if [ $? -ne 0 ]; then
+  echo -e "${RED}ECR login failed. Check AWS credentials.${NC}"
+  exit 1
+fi
 echo "  ✓ Docker authenticated"
 
 # ── STEP 3: Build + Push All Images ──────────────────────────────────────────
-echo -e "\n\033[1;33m[3/7] Building and pushing Docker images...\033[0m"
+echo -e "\n${YELLOW}[3/7] Building and pushing Docker images...${NC}"
 
 # Ensure we're in the right directory
 cd "$(dirname "$0")"
 
+# Backend
 echo "  Building backend..."
-docker build -f backend/Dockerfile -t "${ECR}/vidhi-engine-backend:latest" .
-docker push "${ECR}/vidhi-engine-backend:latest"
+docker build -f backend/Dockerfile -t "${ECR}/vidhi-backend:latest" .
+docker push "${ECR}/vidhi-backend:latest"
 docker system prune -a -f
 
 echo "  Building sandbox-manager..."
