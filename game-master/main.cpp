@@ -128,17 +128,10 @@ int run_simulation(const Config& cfg) {
     if (shm_fd == -1) { perror("open"); return 1; }
     if (ftruncate(shm_fd, SHM_SIZE) < 0) { perror("ftruncate"); return 1; }
 
-    // Try MAP_HUGETLB (2MB hugepage); fall back to regular mmap on systems without it
-    void* raw = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE,
-                     MAP_SHARED | MAP_HUGETLB, shm_fd, 0);
-    if (raw == MAP_FAILED) {
-        // Fallback: regular mmap without hugepage
-        raw = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-        if (raw == MAP_FAILED) { perror("mmap"); close(shm_fd); return 1; }
-        std::cerr << "[GM] shm mmap: hugepage unavailable, using regular 4K pages\n";
-    } else {
-        std::cerr << "[GM] shm mmap: 2MB hugepage ✓\n";
-    }
+    // FIX: Do not attempt MAP_HUGETLB on tmpfs/overlayfs files, it triggers a kernel lock leak returning EAGAIN
+    void* raw = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (raw == MAP_FAILED) { perror("mmap"); close(shm_fd); return 1; }
+    std::cerr << "[GM] shm mmap: using regular 4K pages\n";
     close(shm_fd);
 
     // ── P2-1: NUMA binding — pin rendezvous page to NUMA node 0 ─────────
