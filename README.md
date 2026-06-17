@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="vidhi_context/public/logo.png" alt="Vidhi Arena Logo" width="300" />
+<img src="vidhi_context/public/logo.png" alt="Vidhi Arena Logo" width="800" />
 
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 ![Rust](https://img.shields.io/badge/Go-Orchestrator-00ADD8?style=for-the-badge&logo=go&logoColor=white)
@@ -560,6 +560,67 @@ make sandbox-build  # Rebuild contestant sandbox image
 | Linux seqlock (kernel 2.5.59) | `rendezvous.hpp` GM ↔ Contestant IPC protocol |
 
 ---
+
+
+
+## Setup Instructions (IaC)
+
+Prerequisites:
+- Docker Desktop (or Docker Engine + docker-compose)
+- Node.js (for local frontend dev)
+- Make
+
+### Quick Start
+
+Bring up the entire backend stack (Go API, Postgres, Redis, Worker):
+
+```bash
+make up
+```
+
+This will:
+1. Build the multi-stage Docker image (compiling the C++ Game Master).
+2. Start PostgreSQL and Redis.
+3. Start the Go backend API.
+4. Block until all services are healthy (using `tools/healthcheck.sh`).
+
+### Service URLs
+
+| Service | URL |
+| :--- | :--- |
+| **Frontend UI** | `http://localhost:5173` |
+| **Backend API** | `http://localhost:8080/api` |
+| **WebSocket** | `ws://localhost:8080/ws/telemetry` |
+
+### Database Reset
+
+To completely reset the Postgres schema:
+
+```bash
+make reset-db
+```
+
+### Sandbox Image
+
+The system uses a highly restricted Docker image to run user code safely. To rebuild the sandbox image:
+
+```bash
+make build-sandbox
+```
+
+## API Reference
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/health` | GET | Health check. Returns status of DB and Redis. |
+| `/api/contestants` | POST | Register or update a student/team. |
+| `/api/contests` | GET | List active contests. |
+| `/api/contests` | POST | Admin: Create a new contest. |
+| `/api/credits` | GET | Check remaining runs for today. |
+| `/api/submit` | POST | Submit Python code to the Forge pipeline. |
+| `/api/runs/{id}` | GET | Poll the status of a specific run. |
+| `/api/leaderboard` | GET | Top submissions across the platform. |
+| `/ws/telemetry` | WS | Subscribe to live `TICK_TELEMETRY` JSON stream. |
 
 <div align="center">
 
