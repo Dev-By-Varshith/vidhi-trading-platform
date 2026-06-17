@@ -1,0 +1,66 @@
+name: Fix AWS Networking
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  fix-networking:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Fix ECS Service Network Config
+        run: |
+          # Get the VPC ID for vidhi-vpc
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=vidhi-vpc" --query "Vpcs[0].VpcId" --output text)
+          
+          if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
+            echo "Error: VPC not found."
+            exit 1
+          fi
+          
+          # Get public subnets
+          SUBNET_A=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=availability-zone,Values=us-east-1a" "Name=map-public-ip-on-launch,Values=true" --query "Subnets[0].SubnetId" --output text)
+          SUBNET_B=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=availability-zone,Values=us-east-1b" "Name=map-public-ip-on-launch,Values=true" --query "Subnets[0].SubnetId" --output text)
+          
+          # Get backend security group
+          SG_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=vidhi-backend-sg" --query "SecurityGroups[0].GroupId" --output text)
+
+          echo "Found VPC: $VPC_ID"
+          echo "Found Subnets: $SUBNET_A, $SUBNET_B"
+          echo "Found SG: $SG_ID"
+
+          # Check if VPC has an IGW attached
+          IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query "InternetGateways[0].InternetGatewayId" --output text)
+          
+          if [ "$IGW_ID" == "None" ] || [ -z "$IGW_ID" ]; then
+            echo "No IGW found! Creating one..."
+            IGW_ID=$(aws ec2 create-internet-gateway --query "InternetGateway.InternetGatewayId" --output text)
+            aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+            echo "Created and attached IGW: $IGW_ID"
+          fi
+
+          # Find the main route table
+          RT_ID=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" "Name=association.main,Values=true" --query "RouteTables[0].RouteTableId" --output text)
+          
+          echo "Adding internet route to Route Table: $RT_ID via $IGW_ID"
+          aws ec2 create-route --route-table-id $RT_ID --destination-cidr-block "0.0.0.0/0" --gateway-id $IGW_ID || echo "Route already exists"
+
+          # Make sure public subnets are associated with this route table
+          aws ec2 associate-route-table --subnet-id $SUBNET_A --route-table-id $RT_ID || echo "Already associated"
+          aws ec2 associate-route-table --subnet-id $SUBNET_B --route-table-id $RT_ID || echo "Already associated"
+
+          # Update the ECS service
+          echo "Updating ECS service vidhi-backend to use public subnets with auto-assign public IP enabled..."
+          aws ecs update-service \
+            --cluster vidhi-cluster \
+            --service vidhi-backend \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_A,$SUBNET_B],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
+            --force-new-deployment
+
+          echo "Network fix completed successfully! The backend should boot up in 2 minutes."
