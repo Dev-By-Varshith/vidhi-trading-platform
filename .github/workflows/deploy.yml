@@ -23,10 +23,10 @@ jobs:
           ls -la
           ls -la backend/
           ls -la game-master/
-          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_URL }}
+          aws ecr get-login-password | docker login --username AWS --password-stdin 042470866347.dkr.ecr.us-east-1.amazonaws.com
           docker build -f backend/Dockerfile -t vidhi-engine-backend .
-          docker tag vidhi-engine-backend ${{ secrets.ECR_URL }}/vidhi-engine-backend:latest
-          docker push ${{ secrets.ECR_URL }}/vidhi-engine-backend:latest
+          docker tag vidhi-engine-backend 042470866347.dkr.ecr.us-east-1.amazonaws.com/vidhi-engine-backend:latest
+          docker push 042470866347.dkr.ecr.us-east-1.amazonaws.com/vidhi-engine-backend:latest
 
       - name: Update ECS Fargate Service
         run: |
