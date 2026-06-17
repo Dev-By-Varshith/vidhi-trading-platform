@@ -180,8 +180,8 @@ export async function registerStudent(userId, displayName, teamName) {
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
-export async function fetchLeaderboard() {
-  return get('/leaderboard');
+export async function fetchLeaderboard(roundId = null) {
+  return get(roundId ? `/leaderboard?round_id=${roundId}` : '/leaderboard');
 }
 
 // ─── WebSocket telemetry connection ───────────────────────────────────────────

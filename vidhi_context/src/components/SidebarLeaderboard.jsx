@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Crown, BadgeCheck, Search } from 'lucide-react';
 import ContestStore from '../store/ContestStore';
+import { fetchLeaderboard } from '../api/client';
 
 export default function SidebarLeaderboard({ isOpen }) {
   const location = useLocation();
@@ -13,11 +14,8 @@ export default function SidebarLeaderboard({ isOpen }) {
     async function fetchLB() {
       try {
         const activeRoundId = ContestStore.getActiveRoundId();
-        const url = activeRoundId ? `/api/leaderboard?round_id=${activeRoundId}` : '/api/leaderboard';
-        const res = await fetch(url);
-        if (res.ok) {
-          const rows = await res.json();
-          setData(rows.slice(0, 50).map((r, i) => ({
+        const rows = await fetchLeaderboard(activeRoundId);
+        setData(rows.slice(0, 50).map((r, i) => ({
             rank: r.rank || (i + 1),
             name: r.display_name || r.user_id || 'Anonymous',
             verified: true,
@@ -26,8 +24,6 @@ export default function SidebarLeaderboard({ isOpen }) {
             isMe: false, // Could check against ContestStore state
             type: ''
           })));
-          return;
-        }
       } catch (e) {
         // Fall back to local store if backend offline
         const contestId = ContestStore.state.activeContestId;
