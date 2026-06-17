@@ -1,15 +1,3 @@
-```
-██╗   ██╗██╗██████╗ ██╗  ██╗██╗     █████╗ ██████╗ ███████╗███╗   ██╗ █████╗
-██║   ██║██║██╔══██╗██║  ██║██║    ██╔══██╗██╔══██╗██╔════╝████╗  ██║██╔══██╗
-██║   ██║██║██║  ██║███████║██║    ███████║██████╔╝█████╗  ██╔██╗ ██║███████║
-╚██╗ ██╔╝██║██║  ██║██╔══██║██║    ██╔══██║██╔══██╗██╔══╝  ██║╚██╗██║██╔══██║
- ╚████╔╝ ██║██████╔╝██║  ██║██║    ██║  ██║██║  ██║███████╗██║ ╚████║██║  ██║
-  ╚═══╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝    ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚═╝  ╚═╝
-```
-
-> **A zero-IPC, sub-microsecond algorithmic trading arena.**
-> Built on bare-metal C++20, kernel-isolated sandboxes, and hardware-sympathetic memory physics.
-
 <div align="center">
 
 <img src="vidhi_context/public/logo.png" alt="Vidhi Arena Logo" width="300" />
@@ -28,6 +16,22 @@
 [![Security](https://img.shields.io/badge/Sandbox-5--Layer_Isolation-FF4444?style=for-the-badge)]()
 
 </div>
+
+---
+
+## GETTING STARTED
+
+To clone and work with this repository locally:
+
+```bash
+# Clone the repository
+git clone https://github.com/Dev-By-Varshith/vidhi-trading-platform.git
+
+# Navigate into the project directory
+cd vidhi-trading-platform
+```
+
+Please refer to the deployment section below for full bare-metal or Docker compose deployment steps.
 
 ---
 
@@ -171,7 +175,7 @@ Every tick executes this exact sequence on **Core 2**, pinned via `isolcpus=mana
 ## III. MECHANICAL SYMPATHY — THE INNOVATIONS GRID
 
 <details>
-<summary><strong>⚡ INNOVATION 1: Lock-Free SharedMem Seqlock (Zero-IPC Rendezvous)</strong></summary>
+<summary><strong>INNOVATION 1: Lock-Free SharedMem Seqlock (Zero-IPC Rendezvous)</strong></summary>
 
 The 1,024-byte `SharedMem` struct is the nerve centre of the entire platform. Every field lives on its own dedicated 64-byte cache line via `alignas(64)` to mathematically eliminate false sharing — the MESI protocol invalidation cascade that occurs when two cores write to the same cache line.
 
@@ -207,7 +211,7 @@ The seqlock protocol (`release`→`acquire`) establishes a **happens-before** re
 </details>
 
 <details>
-<summary><strong>🧠 INNOVATION 2: Cache-Line NUMA Topology — Eliminating the UPI Penalty</strong></summary>
+<summary><strong>INNOVATION 2: Cache-Line NUMA Topology — Eliminating the UPI Penalty</strong></summary>
 
 Intel UPI (Ultra Path Interconnect) is the PCIe-style bridge between NUMA sockets on multi-socket servers. A memory access that crosses UPI incurs a **30–50 ns un-bypassable penalty**. At 89 ns total budget, that's a 34–56% latency tax on every tick.
 
@@ -237,7 +241,7 @@ mbind(shm_ptr, SHM_SIZE, MPOL_BIND, &node0_mask, max_node, 0);
 </details>
 
 <details>
-<summary><strong>🔒 INNOVATION 3: 5-Layer Contestant Sandbox — Security Without Latency</strong></summary>
+<summary><strong>INNOVATION 3: 5-Layer Contestant Sandbox — Security Without Latency</strong></summary>
 
 Most sandboxing approaches use gVisor (syscall interception: +100ns per call) or VM isolation (context switch: +1–5μs). We achieve hardware-level isolation at **zero hot-path cost** using five stacked Linux primitives:
 
@@ -254,7 +258,7 @@ The seccomp BPF filter runs in kernel space in **~5 ns** per syscall — far bel
 </details>
 
 <details>
-<summary><strong>📡 INNOVATION 4: Non-Temporal Telemetry — Cache-Pollution-Free Measurement</strong></summary>
+<summary><strong>INNOVATION 4: Non-Temporal Telemetry — Cache-Pollution-Free Measurement</strong></summary>
 
 Normal `MOV` stores go through L1 → L2 → L3 → DRAM. Telemetry data is write-once — we write it from Core 2 and immediately forward it to Core 4 via the telemetry ring. If we used normal stores, 64 bytes of telemetry would **evict 64 bytes of live LOB data** from the 32KB L1 cache.
 
@@ -282,7 +286,7 @@ void record_tick(uint64_t tsc_delta, int64_t pnl_fp) {
 </details>
 
 <details>
-<summary><strong>🐍 INNOVATION 5: Python → Native Machine Code Pipeline (The Forge)</strong></summary>
+<summary><strong>INNOVATION 5: Python → Native Machine Code Pipeline (The Forge)</strong></summary>
 
 Contestants write standard Python. The platform executes native `.so` machine code. No interpreter. No GIL. No garbage collector on the hot path.
 
@@ -318,7 +322,7 @@ contestant_algo.py
 </details>
 
 <details>
-<summary><strong>⏱️ INNOVATION 6: Invariant TSC Calibration — Nanosecond-Precise Measurement</strong></summary>
+<summary><strong>INNOVATION 6: Invariant TSC Calibration — Nanosecond-Precise Measurement</strong></summary>
 
 `__rdtscp` returns CPU clock cycles. On older processors, the TSC varies with CPU P-states and C-states, making nanosecond conversion meaningless. We verify the invariant TSC feature flag via `CPUID` at startup and refuse to run if it's absent.
 
@@ -346,7 +350,7 @@ double calibrate_ns_per_tsc_tick() {
 </details>
 
 <details>
-<summary><strong>🤖 INNOVATION 7: Adversarial Bot Fleet — Avellaneda-Stoikov in 10ns</strong></summary>
+<summary><strong>INNOVATION 7: Adversarial Bot Fleet — Avellaneda-Stoikov in 10ns</strong></summary>
 
 Five bot strategies run **inline on Core 2** — zero IPC, zero fork, zero socket. Their combined compute is ~10 ns for all five. Bots are implemented as C++ structs with direct method dispatch (no `virtual`, no vtable — replaced with templates to save ~25 ns/tick from indirect call overhead).
 
@@ -363,7 +367,7 @@ A contestant who submits a naive "always buy" strategy will be bankrupted by the
 </details>
 
 <details>
-<summary><strong>✅ INNOVATION 8: Shadow LOB Validator — Continuous Correctness Proof</strong></summary>
+<summary><strong>INNOVATION 8: Shadow LOB Validator — Continuous Correctness Proof</strong></summary>
 
 The Telemetry Watchdog on Core 4 maintains an independent parallel LOB that receives the identical order sequence as the main LOB. Every 1,000 ticks, it calls `validate_contestant_state()` — comparing fills produced by both LOBs.
 
