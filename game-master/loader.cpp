@@ -9,6 +9,8 @@
  *   4. dlopen()s the contestant's compiled .so
  *   5. Calls on_tick__cfunc via lock-free atomic sequence IPC
  */
+#define _GNU_SOURCE
+
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
