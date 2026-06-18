@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <cerrno>
 #include <thread>
 #include <chrono>
 #include <emmintrin.h> // For _mm_pause

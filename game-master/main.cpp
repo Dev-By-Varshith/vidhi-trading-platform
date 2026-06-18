@@ -29,6 +29,7 @@
 #include <sys/prctl.h>
 #include <x86intrin.h>   // __rdtscp, _mm_pause, _mm_sfence, _mm_stream_si64
 #include <fcntl.h>
+#include <cerrno>
 
 // NUMA policy binding (P2-1)
 // numaif.h provides mbind() — part of libnuma on Linux.
