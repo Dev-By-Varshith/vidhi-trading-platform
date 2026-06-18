@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 // game-master/main.cpp
 // Vidhi Arena Game Master — Cloud Phase (Bare Metal EPYC, Core 2)
 // Dynamic tick loop: GM + 5 Bots (inline) + Persistent LOB + Contestant Sandbox
