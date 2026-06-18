@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BadgeCheck, Check, ChevronDown, LayoutGrid, MoreHorizontal, Search, Settings2, ShieldCheck, User, Maximize2, Minimize2 } from 'lucide-react';
+import { BadgeCheck, Check, ChevronDown, LayoutGrid, MoreHorizontal, Search, Settings2, ShieldCheck, User, Maximize2, Minimize2, Cloud, Zap } from 'lucide-react';
 import { createChart, ColorType, LineSeries, HistogramSeries } from 'lightweight-charts';
 import VidhiEngine from '../engine/VidhiEngine';
 import ContestStore from '../store/ContestStore';
@@ -270,6 +270,12 @@ export default function SimulationDashboard() {
           >
             Final Submission (1M)
           </div>
+          {/* Live run mode badge */}
+          {liveState && !liveState.done && (
+            VidhiEngine.isCloudMode()
+              ? <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}><Cloud size={12} /> AWS CLOUD RUN</span>
+              : <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: '#4ade80', backgroundColor: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}><Zap size={12} /> LOCAL RUN</span>
+          )}
         </div>
 
         {/* Search Bar */}
@@ -448,9 +454,11 @@ export default function SimulationDashboard() {
                   const asks = liveState?.askDepth || [];
                   const combined = [...bids.slice().reverse(), ...asks];
                   if (combined.length === 0) {
-                    // Fallback visual if no depth data yet
-                    return Array.from({ length: 10 }).map((_, i) => (
-                      <div key={i} style={{ flex: 1, height: `${20 + Math.random() * 40}%`, backgroundColor: i < 5 ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)', borderRadius: '2px 2px 0 0' }} />
+                    // Deterministic placeholder bars — no Math.random()
+                    // Heights based on index position only (symmetric book shape)
+                    const placeholderHeights = [12, 22, 35, 55, 80, 55, 35, 22, 12, 8];
+                    return placeholderHeights.map((h, i) => (
+                      <div key={i} style={{ flex: 1, height: `${h}%`, backgroundColor: i < 5 ? 'rgba(74, 222, 128, 0.08)' : 'rgba(248, 113, 113, 0.08)', borderRadius: '2px 2px 0 0', border: '1px solid rgba(255,255,255,0.03)' }} />
                     ));
                   }
                   return combined.map((level, i) => {

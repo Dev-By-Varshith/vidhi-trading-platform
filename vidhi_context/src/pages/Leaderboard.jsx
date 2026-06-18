@@ -4,9 +4,10 @@
 // This shows: your PnL% vs other students' submitted PnL% for this contest.
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Trophy, TrendingUp, TrendingDown, Zap, Award, Users, Info, Crown, ChevronDown } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, Zap, Award, Users, Info, Crown, ChevronDown, Cloud } from 'lucide-react';
 import ContestStore from '../store/ContestStore';
 import VidhiEngine from '../engine/VidhiEngine';
+import { fetchLeaderboard, getCloudBaseUrl } from '../api/client';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 // ─── Canvas sparkline ─────────────────────────────────────────────────────────
@@ -153,34 +154,55 @@ export default function Leaderboard() {
       setTimeout(() => setPulse(false), 400);
     });
     const unsubStatus = VidhiEngine.onStatus(() => {
-      setBackendOnline(VidhiEngine.getMode() === 'backend');
+      setBackendOnline(VidhiEngine.getMode() === 'backend' || VidhiEngine.getMode() === 'cloud');
     });
 
     // Poll real leaderboard from backend every 10s
+    // Dual leaderboard:
+    //   phase=test   → Test Leaderboard  (test run PnL, 99.99k ticks)
+    //   phase=final  → Round Leaderboard (final 999.99k run, calculated at round end)
     let interval = null;
     async function fetchLB() {
-      let url = '/api/leaderboard';
+      // Use cloud base URL if we're in cloud mode, else local
+      const cloudBase = VidhiEngine.isCloudMode() ? getCloudBaseUrl() : null;
+
+      let roundId = null;
+      let phase   = null;
+
       if (activeFilter !== 'main') {
-        const [rid, phase] = activeFilter.split('-phase-');
-        url = `/api/leaderboard?round_id=${rid}&phase=${phase}`;
+        const parts = activeFilter.split('-phase-');
+        roundId = parts[0];
+        phase   = parts[1] || null;
       }
-      fetch(url)
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (!data) return;
-          setBackendOnline(true);
-          setBackendRows(data.slice(0, 50).map((r, i) => ({
-            id:     r.user_id,
-            name:   r.display_name || r.user_id || 'Anonymous',
-            team:   r.team_name || '',
-            pnlPct: r.pnl_pct   ?? 0,
-            p99:    r.p99_ns    ?? 0,
-            fills:  r.total_fills ?? 0,
-            rounds: [],
-            rank:   r.rank || (i + 1),
-          })));
-        })
-        .catch(() => setBackendOnline(false));
+
+      try {
+        // Always try to fetch from both local and cloud, prefer cloud if available
+        const localPromise = fetchLeaderboard(roundId, phase, null)
+          .catch(() => null);
+        const cloudPromise = cloudBase
+          ? fetchLeaderboard(roundId, phase, cloudBase).catch(() => null)
+          : Promise.resolve(null);
+
+        const [localData, cloudData] = await Promise.all([localPromise, cloudPromise]);
+        const data = cloudData || localData;
+
+        if (!data) return;
+        setBackendOnline(true);
+        setBackendRows(data.slice(0, 50).map((r, i) => ({
+          id:     r.user_id,
+          name:   r.display_name || r.user_id || 'Anonymous',
+          team:   r.team_name || '',
+          pnlPct: r.pnl_pct    ?? 0,
+          p99:    r.p99_ns     ?? 0,
+          p50:    r.p50_ns     ?? 0,
+          fills:  r.total_fills ?? 0,
+          rounds: [],
+          rank:   r.rank || (i + 1),
+          source: cloudData ? 'cloud' : 'local',
+        })));
+      } catch (_e) {
+        setBackendOnline(false);
+      }
     }
 
     fetchLB();
@@ -203,12 +225,14 @@ export default function Leaderboard() {
 
   const activeRound = contest?.rounds?.find(r => r.status === 'active');
 
-  // Build filter options
-  const filterOptions = [{ id: 'main', label: 'Main Leaderboard' }];
+  // Dual leaderboard filter options:
+  //   phase=test   → Test Leaderboard  (test run results, 99.99k ticks, CSV + bots)
+  //   phase=final  → Round Leaderboard (final 999.99k run at round end, scored)
+  const filterOptions = [{ id: 'main', label: '🏆 Main Leaderboard (All Rounds)' }];
   if (contest?.rounds) {
     contest.rounds.forEach(r => {
-      filterOptions.push({ id: `${r.id}-phase-test`, label: `${r.name} - Test Results` });
-      filterOptions.push({ id: `${r.id}-phase-final`, label: `${r.name} - Final Results` });
+      filterOptions.push({ id: `${r.id}-phase-test`,  label: `⚡ ${r.name} — Test Results (99.99k)` });
+      filterOptions.push({ id: `${r.id}-phase-final`, label: `☁ ${r.name} — Round Results (999.99k, Scored)` });
     });
   }
 
@@ -286,12 +310,19 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* ── Bots note ──────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px',
         backgroundColor: '#050505', border: '1px solid #1a1a1a', fontSize: '0.7rem',
-        fontFamily: "'Roboto Mono', monospace", color: '#555' }}>
-        <Info size={12} />
-        Bots run privately inside each student's simulation — they are NOT on this board. This is student vs student.
+        fontFamily: "'Roboto Mono', monospace", color: '#555', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Info size={12} />
+          Bots run privately inside each student's simulation — NOT on this board. Student vs student only.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade8088' }}>
+          <Zap size={11} /> ⚡ Test Results = PnL from your 99.99k test run (CSV + bots + your code)
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf888' }}>
+          <Cloud size={11} /> ☁ Round Results = PnL from 999.99k final run (scored, at round end)
+        </div>
       </div>
 
       {/* No contest state */}

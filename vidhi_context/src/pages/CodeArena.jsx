@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useNavigate } from 'react-router-dom';
-import { X, CheckCircle2, Loader2, ShieldCheck, Cpu, Code2 } from 'lucide-react';
+import { X, CheckCircle2, Loader2, ShieldCheck, Cpu, Code2, Cloud, Zap } from 'lucide-react';
 import VidhiEngine from '../engine/VidhiEngine';
 import ContestStore from '../store/ContestStore';
 
@@ -212,14 +212,14 @@ export default function CodeArena() {
 
   const handleRunLocal = async () => {
     ContestStore.saveLastCode(code);
-    const options = { maxTicks: 100_000, isFinal: false };
-    await VidhiEngine.startSimulation(code, options);
+    // forceLocal=true → always JS Web Worker with real test CSV + bots (never hits any backend)
+    await VidhiEngine.startSimulation(code, { forceLocal: true, maxTicks: 100_000 });
   };
 
-  const handleSubmitCloud = async () => {
+  const handleRunCloud = async () => {
     ContestStore.saveLastCode(code);
-    const options = { maxTicks: 1_000_000, isFinal: true };
-    await VidhiEngine.startSimulation(code, options);
+    // forceCloud=true → always routes to AWS cloud backend (C++ GM + real CSV + real bots)
+    await VidhiEngine.startSimulation(code, { forceCloud: true, maxTicks: 100_000 });
   };
 
   return (
@@ -289,42 +289,64 @@ export default function CodeArena() {
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-              Credits Remaining: <span style={{ color: 'var(--accent-green)' }}>5/5</span>
-            </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', cursor: 'pointer', textDecoration: 'underline' }}>
-              View Strategy Compilation Logs
+              Engine Mode:
+              {simStatus === 'idle' && <span style={{ color: '#555', marginLeft: '6px' }}>idle</span>}
+              {['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) && (
+                VidhiEngine.isCloudMode()
+                  ? <span style={{ color: '#38bdf8', marginLeft: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Cloud size={12} /> AWS Cloud</span>
+                  : <span style={{ color: '#4ade80', marginLeft: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Zap size={12} /> Local Worker</span>
+              )}
             </span>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
-              Backend persistent fields: `state.ema_fast`, `state.ema_slow`, `state.tick_count`, `state.s0..state.s7`
+              Local: JS Worker + real test CSV (99.99k ticks) &nbsp;|&nbsp; Cloud: AWS C++ GM + bots
+            </span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
+              Backend state fields: <code style={{ color: 'var(--accent-blue)' }}>state.ema_fast</code>, <code style={{ color: 'var(--accent-blue)' }}>state.ema_slow</code>, <code style={{ color: 'var(--accent-blue)' }}>state.s0..s7</code>
             </span>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {/* Run Test Case (Local) — always uses JS Web Worker + real test CSV */}
             <button
+              id="btn-run-local"
               onClick={handleRunLocal}
+              disabled={['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus)}
               style={{
-                backgroundColor: 'transparent', color: '#fff', border: '1px solid #2D3342',
-                borderRadius: '6px', padding: '10px 24px', fontSize: '0.9rem',
-                fontWeight: 600, cursor: 'pointer',
-                transition: 'all 0.2s'
+                backgroundColor: 'transparent',
+                color: ['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) ? '#444' : '#fff',
+                border: '1px solid #2D3342',
+                borderRadius: '6px', padding: '10px 20px', fontSize: '0.88rem',
+                fontWeight: 600, cursor: ['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', gap: '7px'
               }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+              onMouseEnter={e => { if (!['queued','running'].includes(simStatus)) e.currentTarget.style.backgroundColor = 'rgba(74,222,128,0.07)'; }}
               onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
             >
+              <Zap size={15} color="#4ade80" />
               Run Test Case (Local)
             </button>
+
+            {/* Run Test Cloud — always routes to AWS cloud backend */}
             <button
-              onClick={handleSubmitCloud}
+              id="btn-run-cloud"
+              onClick={handleRunCloud}
+              disabled={['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus)}
               style={{
-                backgroundColor: '#326BFF', color: '#fff', border: 'none',
-                borderRadius: '6px', padding: '10px 32px', fontSize: '0.9rem',
-                fontWeight: 600, cursor: 'pointer', boxShadow: '0 4px 12px rgba(50, 107, 255, 0.3)',
-                transition: 'all 0.2s'
+                backgroundColor: ['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) ? '#1a2540' : '#326BFF',
+                color: '#fff', border: 'none',
+                borderRadius: '6px', padding: '10px 28px', fontSize: '0.88rem',
+                fontWeight: 600,
+                cursor: ['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) ? 'not-allowed' : 'pointer',
+                boxShadow: ['queued','scanning','transpiling','compiling','validating','queued_gm','running'].includes(simStatus) ? 'none' : '0 4px 12px rgba(50, 107, 255, 0.3)',
+                transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', gap: '7px'
               }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1D5CFF'}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#326BFF'}
+              onMouseEnter={e => { if (!['queued','running'].includes(simStatus)) e.currentTarget.style.backgroundColor = '#1D5CFF'; }}
+              onMouseLeave={e => { if (!['queued','running'].includes(simStatus)) e.currentTarget.style.backgroundColor = '#326BFF'; }}
             >
-              Submit Strategy (Cloud)
+              <Cloud size={15} />
+              Run Test Cloud
             </button>
           </div>
         </div>

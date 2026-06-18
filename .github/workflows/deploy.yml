@@ -51,9 +51,23 @@ jobs:
         run: |
           cd vidhi_context
           npm ci
-          # Inject the ALB URL so the frontend knows where the API is
-          VITE_API_URL=http://${{ secrets.ALB_URL }} npm run build
+          # VITE_API_URL      = local/relative API (proxied or ALB for same-origin)
+          # VITE_CLOUD_API_URL = AWS ALB REST endpoint for cloud simulation runs
+          # VITE_CLOUD_WS_URL  = AWS ALB WebSocket endpoint for cloud telemetry
+          VITE_API_URL=http://${{ secrets.ALB_URL }} \
+          VITE_CLOUD_API_URL=http://${{ secrets.ALB_URL }} \
+          VITE_CLOUD_WS_URL=ws://${{ secrets.ALB_URL }}/ws \
+          npm run build
           
       - name: Sync to S3
         run: |
           aws s3 sync vidhi_context/dist/ s3://${{ secrets.FRONTEND_BUCKET }} --delete
+          
+      - name: Invalidate CloudFront cache (if configured)
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+              --paths "/*"
+          fi

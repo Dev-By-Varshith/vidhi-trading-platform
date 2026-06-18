@@ -64,12 +64,23 @@ class ContestStore {
 
   // ── Backend Sync ──────────────────────────────────────────────────────────
   async fetchContestsFromServer() {
+    const localUrl = (import.meta.env.VITE_API_URL    || '') + '/api/contests';
+    const cloudUrl = (import.meta.env.VITE_CLOUD_API_URL || '') + '/api/contests';
+
+    const tryFetch = async (url) => {
+      if (!url || url === '/api/contests') return null;
+      const res = await fetch(url).catch(() => null);
+      if (!res || !res.ok) return null;
+      return res.json().catch(() => null);
+    };
+
     try {
-      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/contests');
-      if (res.ok) {
-        const data = await res.json();
-        // The backend returns an array of Contests. We'll merge them.
-        // If the backend has no rounds, ensure it's empty array
+      const [localData, cloudData] = await Promise.all([
+        tryFetch(localUrl),
+        tryFetch(cloudUrl),
+      ]);
+      const data = cloudData || localData;
+      if (data && Array.isArray(data)) {
         this.state.contests = data.map(c => ({
           ...c,
           participants: c.participants || [],
@@ -81,6 +92,7 @@ class ContestStore {
       console.warn('Failed to fetch contests from server:', e);
     }
   }
+
 
   // ── Telemetry (WebSocket with Throttling) ──────────────────────────────────
   connectTelemetry(wsConnectFn) {
