@@ -407,12 +407,18 @@ class VidhiEngine {
 
   // ── Cloud path: POST to AWS ALB → poll → WS telemetry ────────────────────
   async _startCloudRun(code, options = {}) {
-    const cloudBase = getCloudBaseUrl();
-    const cloudWs   = getCloudWsUrl();
+    // Fallback to hardcoded ALB URL if env var not set at build time
+    const HARDCODED_ALB = 'http://vidhi-alb-141110176.us-east-1.elb.amazonaws.com';
+    let cloudBase = getCloudBaseUrl();
+    let cloudWs   = getCloudWsUrl();
 
+    // If env var is missing, fall back to the hardcoded known ALB
     if (!cloudBase || cloudBase === '/api') {
-      this._failBeforeRun('VITE_CLOUD_API_URL is not configured. Set it in .env to use cloud runs.');
-      return;
+      cloudBase = HARDCODED_ALB + '/api';
+      cloudWs   = 'ws://vidhi-alb-141110176.us-east-1.elb.amazonaws.com/ws/telemetry';
+      this._log(`[CLOUD] VITE_CLOUD_API_URL not set — using hardcoded ALB: ${HARDCODED_ALB}`);
+    } else {
+      this._log(`[CLOUD] Target: ${cloudBase}`);
     }
 
     const validationError = this._validateBackendPython(code);
@@ -425,7 +431,7 @@ class VidhiEngine {
     // Connect cloud WS first so we don't miss early messages
     this._connectWS(cloudWs);
 
-    this._log('[CLOUD] Submitting to AWS cloud forge pipeline...');
+    this._log(`[CLOUD] Submitting to ${cloudBase}/submit ...`);
     try {
       const storeState = ContestStore.state;
       const userId = storeState.studentId || (storeState.studentName
@@ -452,6 +458,13 @@ class VidhiEngine {
           await autoProvisionApiKey(userId, cloudBase);
           const retryResult = await submitCode(code, userId, roundId, true, botConfig, cloudBase);
           run_id = retryResult.run_id;
+        } else if (e.message === 'Failed to fetch' || e.message.includes('NetworkError') || e.message.includes('CORS')) {
+          this._failBeforeRun(
+            `Cloud connection failed (CORS/Network): Cannot reach ${cloudBase}\n\n` +
+            `This usually means the AWS ALB is not running or is blocking cross-origin requests from the S3 site.\n` +
+            `Check: Is the backend ECS service running? Does the ALB have CORS headers set?`
+          );
+          return;
         } else {
           throw e;
         }

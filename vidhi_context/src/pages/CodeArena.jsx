@@ -189,13 +189,39 @@ export default function CodeArena() {
       }
 
       if (status === 'error' || status === 'tle') {
-        const runId = VidhiEngine.instance?.currentRunId;
+        // VidhiEngine IS the singleton instance — use public API methods
+        const lastState = VidhiEngine.getLastState();
+        const logHistory = VidhiEngine.getLogHistory();
+        const runId = VidhiEngine.getCurrentRunId();
+
+        // Fetch execution log for diagnostics
         if (runId) {
-            console.log("Failed run ID:", runId);
-            fetch(`/api/runs/${runId}/execution-log`).then(r => r.text()).then(t => console.error("EXECUTION LOG FROM AWS:", t));
+          console.log('[DEBUG] Failed run ID:', runId, '| Mode:', VidhiEngine.getMode());
+          const logBase = VidhiEngine.isCloudMode()
+            ? (import.meta.env.VITE_CLOUD_API_URL || '') + '/api'
+            : '/api';
+          fetch(`${logBase}/runs/${runId}/execution-log`)
+            .then(r => r.text())
+            .then(t => console.error('[EXECUTION LOG]:', t))
+            .catch(e => console.warn('[EXECUTION LOG fetch failed]:', e.message));
         }
-        const errorMsg = VidhiEngine.instance?.lastState?.errorMessage || VidhiEngine.instance?.lastState?.error || VidhiEngine.instance?.logHistory[VidhiEngine.instance.logHistory.length - 1]?.msg || 'Compilation or Engine Error';
-        alert('Simulation Error:\n\n' + errorMsg + '\n\nCheck browser console for more details.');
+
+        // Read error message — prefer errorMessage, then error field, then last log line
+        const lastLog = logHistory.length > 0 ? logHistory[logHistory.length - 1] : null;
+        const errorMsg = lastState?.errorMessage
+          || lastState?.error
+          || (typeof lastLog === 'string' ? lastLog : null)
+          || 'Simulation failed — check browser console (F12) for details.';
+
+        console.error('[SIMULATION ERROR]', {
+          mode: VidhiEngine.getMode(),
+          status,
+          errorMsg,
+          lastState,
+          logHistory,
+        });
+
+        alert('Simulation Error:\n\n' + errorMsg + '\n\nOpen DevTools (F12 → Console) to see the full error.');
         hasNavigatedRef.current = false;
         setShowModal(false);
         startTimeRef.current = 0;
