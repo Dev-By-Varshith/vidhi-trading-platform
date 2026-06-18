@@ -164,6 +164,7 @@ export default function CodeArena() {
   const [showModal, setShowModal] = useState(false);
   const hasNavigatedRef = useRef(false);
   const startTimeRef = useRef(0);
+  const hasShownErrorRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -189,6 +190,10 @@ export default function CodeArena() {
       }
 
       if (status === 'error' || status === 'tle') {
+        // Guard: only show one alert per simulation run
+        if (hasShownErrorRef.current) return;
+        hasShownErrorRef.current = true;
+
         // VidhiEngine IS the singleton instance — use public API methods
         const lastState = VidhiEngine.getLastState();
         const logHistory = VidhiEngine.getLogHistory();
@@ -238,12 +243,16 @@ export default function CodeArena() {
 
   const handleRunLocal = async () => {
     ContestStore.saveLastCode(code);
+    hasShownErrorRef.current  = false;  // reset for new run
+    hasNavigatedRef.current   = false;
     // forceLocal=true → always JS Web Worker with real test CSV + bots (never hits any backend)
     await VidhiEngine.startSimulation(code, { forceLocal: true, maxTicks: 100_000 });
   };
 
   const handleRunCloud = async () => {
     ContestStore.saveLastCode(code);
+    hasShownErrorRef.current  = false;  // reset for new run
+    hasNavigatedRef.current   = false;
     // forceCloud=true → always routes to AWS cloud backend (C++ GM + real CSV + real bots)
     await VidhiEngine.startSimulation(code, { forceCloud: true, maxTicks: 100_000 });
   };

@@ -120,18 +120,27 @@ static pid_t g_sandbox_pid = -1;
 // ─── Main tick loop ───────────────────────────────────────────────────────
 int run_simulation(const Config& cfg) {
 
-    // FIX #7: Use 2MB for hugepage backing (MAP_HUGETLB requires region ≥ 2MB).
-    // The rendezvous struct is 1152B but we mmap 2MB so MADV_HUGEPAGE / MAP_HUGETLB can apply.
+    // Use POSIX shm_open() → /dev/shm — properly supports MAP_SHARED in Docker/ECS Fargate.
+    // The /tmp directory uses OverlayFS in containers which returns EAGAIN on MAP_SHARED mmap.
+    // /dev/shm is always a proper tmpfs that supports shared memory mapping.
     static constexpr size_t SHM_SIZE = 2 * 1024 * 1024;  // 2MB
-    std::string shm_name = "/tmp/vidhi_shm_" + cfg.run_id;
-    int shm_fd = open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
-    if (shm_fd == -1) { perror("open"); return 1; }
-    if (ftruncate(shm_fd, SHM_SIZE) < 0) { perror("ftruncate"); return 1; }
+    std::string shm_name = "/vidhi_shm_" + cfg.run_id;
+    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
+    if (shm_fd == -1) { perror("shm_open"); return 1; }
+    if (ftruncate(shm_fd, SHM_SIZE) < 0) {
+        perror("ftruncate");
+        shm_unlink(shm_name.c_str());
+        return 1;
+    }
 
-    // FIX: Do not attempt MAP_HUGETLB on tmpfs/overlayfs files, it triggers a kernel lock leak returning EAGAIN
     void* raw = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (raw == MAP_FAILED) { perror("mmap"); close(shm_fd); return 1; }
-    std::cerr << "[GM] shm mmap: using regular 4K pages\n";
+    if (raw == MAP_FAILED) {
+        perror("mmap");
+        close(shm_fd);
+        shm_unlink(shm_name.c_str());
+        return 1;
+    }
+    std::cerr << "[GM] shm_open → /dev/shm: POSIX shared memory mapped (" << SHM_SIZE/1024 << "KB) ✓\n";
     close(shm_fd);
 
     // ── P2-1: NUMA binding — pin rendezvous page to NUMA node 0 ─────────
@@ -337,7 +346,7 @@ int run_simulation(const Config& cfg) {
     std::cout << "}" << std::endl;
 
     munmap(raw, SHM_SIZE);
-    shm_unlink(shm_name.c_str());  // clean up the shm object
+    shm_unlink(shm_name.c_str());  // clean up POSIX shared memory from /dev/shm
     if (g_sandbox_pid > 0) {
         kill(g_sandbox_pid, SIGTERM);
         waitpid(g_sandbox_pid, nullptr, 0);

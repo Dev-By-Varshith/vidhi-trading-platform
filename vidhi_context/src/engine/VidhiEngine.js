@@ -132,7 +132,7 @@ class VidhiEngine {
     if (msg.type === 'RUN_UPDATE' && msg.payload) {
       if (this.currentRunId && msg.payload.run_id !== this.currentRunId) return;
       const run = msg.payload;
-      this._setStatus(run.status);
+      // NOTE: do NOT call _setStatus here yet — build mapped first so lastState is valid
       const mapped = {
         runId:       run.run_id,
         status:      run.status,
@@ -151,8 +151,10 @@ class VidhiEngine {
 
       if (run.status === 'complete' || run.status === 'error' || run.status === 'tle') {
         this.isSimulating = false;
-        this._setStatus(run.status === 'complete' ? 'done' : 'error');
+        this._pollStopped = true;  // tell polling loop to stop
+        // Set lastState FIRST so onStatus subscribers read valid state
         this.lastState = { ...this.lastState, ...mapped, done: true };
+        this._setStatus(run.status === 'complete' ? 'done' : 'error');
         this.completeSubscribers.forEach(cb => cb(mapped));
 
         if (run.status === 'complete') {
@@ -374,6 +376,7 @@ class VidhiEngine {
     this.currentCode = code;
     this._resetDecimation();
     this.logHistory  = [];
+    this._pollStopped = false;  // reset poll guard for new run
 
     // Disconnect any existing WS before starting a new run
     this._disconnectWS();
@@ -477,6 +480,9 @@ class VidhiEngine {
       // Kick off polling as fallback for WS
       const maxTicks = options.maxTicks || 100_000;
       pollRunUntilDone(run_id, (run) => {
+        // If WS already handled terminal status, skip poll callbacks to avoid duplicate alerts
+        if (this._pollStopped) return;
+
         const msg = `[POLL/CLOUD] ${run.status} — tick ${(run.total_ticks || 0).toLocaleString()}`;
         this._log(msg);
 
@@ -494,11 +500,13 @@ class VidhiEngine {
         }
 
         if (run.status === 'error' || run.status === 'tle') {
+          if (this._pollStopped) return;  // double-check after async gap
           const errorMessage = run.status === 'tle'
             ? 'Cloud submission timed out during backend execution.'
             : 'Cloud submission failed in the Forge pipeline before live simulation ticks started.';
           this.isSimulating = false;
-          this._setStatus('error');
+          this._pollStopped = true;
+          // Set lastState BEFORE _setStatus so subscriber reads valid error info
           this.lastState = {
             ...(this.lastState || {}),
             runId:        run.run_id,
@@ -509,9 +517,11 @@ class VidhiEngine {
             mode:         'cloud',
             code:         this.currentCode,
           };
+          this._setStatus('error');
           this.completeSubscribers.forEach(cb => cb(this.lastState));
         }
       }, cloudBase).catch(e => this._log('[POLL/CLOUD] ' + e.message));
+
 
     } catch (e) {
       this._failBeforeRun('Cloud submit failed: ' + e.message);

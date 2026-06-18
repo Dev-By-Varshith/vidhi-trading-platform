@@ -57,9 +57,18 @@ function parseVidhiBinary(arrayBuffer) {
 
 async function loadDatasetFromBackend(datasetKey) {
   const fileName = normalizeDatasetFilename(datasetKey, MAX_TICKS);
-  const response = await fetch(`/api/datasets/${encodeURIComponent(fileName)}`);
+  // Use ALB URL directly when available (S3-hosted site can't proxy /api/ calls).
+  // In local dev, Vite proxy handles /api/ → localhost:8080 correctly.
+  const ALB_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CLOUD_API_URL)
+    || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
+    || '';
+  const url = ALB_BASE
+    ? `${ALB_BASE}/api/datasets/${encodeURIComponent(fileName)}`
+    : `/api/datasets/${encodeURIComponent(fileName)}`;
+
+  const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Backend dataset fetch failed (${response.status})`);
+    throw new Error(`Backend dataset fetch failed (${response.status}) from ${url}`);
   }
   const arrayBuffer = await response.arrayBuffer();
   DATASET_PRICES = parseVidhiBinary(arrayBuffer);
