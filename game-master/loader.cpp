@@ -61,33 +61,53 @@ int main() {
         }
     }
     
-    // POSIX shared memory name — MUST match what the GM creates in main.cpp.
-    // GM uses shm_open("/vidhi_shm_" + run_id) → /dev/shm, NOT /tmp.
-    std::string shm_name;
-    if (!run_id_str.empty()) {
-        shm_name = "/vidhi_shm_" + run_id_str;
-    } else {
-        shm_name = "/vidhi_arena"; // last-resort fallback for local testing
-    }
-    std::cerr << "[LOADER] Connecting to POSIX SHM: " << shm_name << "\n";
-    
-    static constexpr size_t SHM_SIZE = 2 * 1024 * 1024; // MUST match GM's 2MB mmap
+    // ── Map Shared Memory ──────────────────────────────────────────────────────
+    // PRIMARY: read the fd number passed by GM via VIDHI_SHM_FD (memfd_create path).
+    //   The memfd fd survives fork+execl because it was created without MFD_CLOEXEC.
+    // FALLBACK: use shm_open on VIDHI_SHM_NAME (POSIX SHM path in /dev/shm).
+    static constexpr size_t SHM_SIZE = 2 * 1024 * 1024; // MUST match GM's 2MB
 
-    // Retry shm_open for up to 30 seconds — GM may create SHM after sandbox starts
     int fd = -1;
-    for (int attempt = 0; attempt < 300; ++attempt) {
-        fd = shm_open(shm_name.c_str(), O_RDWR, 0);
-        if (fd >= 0) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const char* shm_fd_env = std::getenv("VIDHI_SHM_FD");
+    if (shm_fd_env && shm_fd_env[0] != '\0') {
+        fd = std::atoi(shm_fd_env);
+        // Validate the fd is still open and is the right size
+        struct stat st;
+        if (fstat(fd, &st) != 0) {
+            std::cerr << "[LOADER] VIDHI_SHM_FD=" << fd << " not valid: " << strerror(errno) << " — trying shm_open\n";
+            fd = -1;
+        } else {
+            std::cerr << "[LOADER] Using inherited memfd fd=" << fd << " (" << st.st_size << " bytes) ✓\n";
+        }
     }
+
     if (fd < 0) {
-        std::cerr << "[LOADER] shm_open(" << shm_name << ") failed after 30s: " << strerror(errno) << "\n";
-        return 1;
+        // Fallback: POSIX shared memory name
+        std::string shm_name;
+        const char* shm_name_env = std::getenv("VIDHI_SHM_NAME");
+        if (shm_name_env && shm_name_env[0] != '\0') {
+            shm_name = shm_name_env;
+        } else if (!run_id_str.empty()) {
+            shm_name = "/vidhi_shm_" + run_id_str;
+        } else {
+            shm_name = "/vidhi_arena";
+        }
+        std::cerr << "[LOADER] Trying shm_open: " << shm_name << "\n";
+        // Retry for up to 30s — GM may create SHM after sandbox starts
+        for (int attempt = 0; attempt < 300 && fd < 0; ++attempt) {
+            fd = shm_open(shm_name.c_str(), O_RDWR, 0);
+            if (fd < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (fd < 0) {
+            std::cerr << "[LOADER] shm_open(" << shm_name << ") failed after 30s: " << strerror(errno) << "\n";
+            return 1;
+        }
+        std::cerr << "[LOADER] shm_open: " << shm_name << " ✓\n";
     }
-    std::cerr << "[LOADER] POSIX SHM connected: " << shm_name << " ✓\n";
 
     void* ptr = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
+
     if (ptr == MAP_FAILED) {
         std::cerr << "[LOADER] mmap failed: " << strerror(errno) << "\n";
         return 1;

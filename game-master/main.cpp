@@ -19,15 +19,15 @@
 #include <vector>
 
 // Linux/POSIX
-#include <sys/mman.h>    // mmap, shm_open
+#include <sys/mman.h>    // mmap, shm_open, memfd_create
 #include <sys/stat.h>
 #include <sched.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <sys/wait.h>    // waitpid
 #include <sched.h>       // sched_setaffinity
 #include <sys/prctl.h>
 #include <x86intrin.h>   // __rdtscp, _mm_pause, _mm_sfence, _mm_stream_si64
+#include <fcntl.h>
 
 // NUMA policy binding (P2-1)
 // numaif.h provides mbind() — part of libnuma on Linux.
@@ -120,28 +120,49 @@ static pid_t g_sandbox_pid = -1;
 // ─── Main tick loop ───────────────────────────────────────────────────────
 int run_simulation(const Config& cfg) {
 
-    // Use POSIX shm_open() → /dev/shm — properly supports MAP_SHARED in Docker/ECS Fargate.
-    // The /tmp directory uses OverlayFS in containers which returns EAGAIN on MAP_SHARED mmap.
-    // /dev/shm is always a proper tmpfs that supports shared memory mapping.
+    // ── Shared memory: use memfd_create() for anonymous memory (no filesystem) ──
+    // memfd_create() is the most robust IPC mechanism in Docker/ECS Fargate:
+    //   - No /tmp OverlayFS issues (which causes EAGAIN on MAP_SHARED)
+    //   - No /dev/shm size limit from ECS task definition linuxParameters.sharedMemorySize
+    //   - Anonymous: lives in RAM only, auto-cleaned when all fds are closed
+    //   - Survives fork()+execl() because it is NOT created with MFD_CLOEXEC
     static constexpr size_t SHM_SIZE = 2 * 1024 * 1024;  // 2MB
-    std::string shm_name = "/vidhi_shm_" + cfg.run_id;
-    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
-    if (shm_fd == -1) { perror("shm_open"); return 1; }
+    int shm_fd = -1;
+    std::string shm_posix_name;  // only set if fallback shm_open path is used
+
+    // Primary: memfd_create (Linux 3.17+, always works in Docker/ECS without privileges)
+    shm_fd = memfd_create("vidhi_shm", 0 /*no MFD_CLOEXEC — fd must survive execl*/);
+    if (shm_fd >= 0) {
+        std::cerr << "[GM] memfd_create: anonymous SHM fd=" << shm_fd << " (no filesystem) ✓\n";
+    } else {
+        // Fallback: shm_open → /dev/shm (proper tmpfs, not OverlayFS)
+        std::cerr << "[WARN] memfd_create failed (errno=" << errno << ") — trying shm_open\n";
+        shm_posix_name = "/vidhi_shm_" + cfg.run_id;
+        shm_fd = shm_open(shm_posix_name.c_str(), O_CREAT | O_RDWR, 0600);
+        if (shm_fd < 0) {
+            perror("shm_open");
+            return 1;
+        }
+        std::cerr << "[GM] shm_open fallback: /dev/shm" << shm_posix_name << "\n";
+    }
+
     if (ftruncate(shm_fd, SHM_SIZE) < 0) {
         perror("ftruncate");
-        shm_unlink(shm_name.c_str());
+        if (!shm_posix_name.empty()) shm_unlink(shm_posix_name.c_str());
+        close(shm_fd);
         return 1;
     }
 
     void* raw = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (raw == MAP_FAILED) {
         perror("mmap");
+        if (!shm_posix_name.empty()) shm_unlink(shm_posix_name.c_str());
         close(shm_fd);
-        shm_unlink(shm_name.c_str());
         return 1;
     }
-    std::cerr << "[GM] shm_open → /dev/shm: POSIX shared memory mapped (" << SHM_SIZE/1024 << "KB) ✓\n";
-    close(shm_fd);
+    std::cerr << "[GM] Shared memory mapped: " << SHM_SIZE / 1024 << " KB ✓\n";
+    // IMPORTANT: do NOT close(shm_fd) yet — child process inherits it across execl().
+    // We close it in the PARENT after fork().
 
     // ── P2-1: NUMA binding — pin rendezvous page to NUMA node 0 ─────────
     // mbind() ensures that physical memory backing the shared page is allocated
@@ -168,6 +189,16 @@ int run_simulation(const Config& cfg) {
 
     // ── Spawn Contestant Sandbox (Child Process) ───────────────────────
     if (!cfg.so_path.empty() && !cfg.external_sandbox) {
+        // Pass the SHM fd number to the loader via env var.
+        // The fd survives execl() because memfd_create() was called without MFD_CLOEXEC.
+        char fd_buf[32];
+        snprintf(fd_buf, sizeof(fd_buf), "%d", shm_fd);
+        setenv("VIDHI_SHM_FD", fd_buf, 1);
+        // Also pass POSIX name for fallback (shm_open path)
+        if (!shm_posix_name.empty()) {
+            setenv("VIDHI_SHM_NAME", shm_posix_name.c_str(), 1);
+        }
+
         g_sandbox_pid = fork();
         if (g_sandbox_pid < 0) {
             perror("fork"); return 1;
@@ -180,8 +211,12 @@ int run_simulation(const Config& cfg) {
             perror("execl");
             exit(1);
         }
+        // Parent: close our copy of shm_fd (mmap mapping stays alive; child has its copy)
+        close(shm_fd);
+        if (!shm_posix_name.empty()) shm_unlink(shm_posix_name.c_str());
         std::cerr << "[GM] Spawned sandbox process PID " << g_sandbox_pid << " for " << cfg.so_path << std::endl;
     } else {
+        close(shm_fd);
         std::cerr << "[GM] No .so provided — running with null contestant (testing mode)" << std::endl;
     }
 
@@ -346,7 +381,7 @@ int run_simulation(const Config& cfg) {
     std::cout << "}" << std::endl;
 
     munmap(raw, SHM_SIZE);
-    shm_unlink(shm_name.c_str());  // clean up POSIX shared memory from /dev/shm
+    // shm_posix_name already unlinked above (after fork). memfd auto-cleans when all fds closed.
     if (g_sandbox_pid > 0) {
         kill(g_sandbox_pid, SIGTERM);
         waitpid(g_sandbox_pid, nullptr, 0);
