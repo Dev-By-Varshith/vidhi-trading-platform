@@ -199,18 +199,6 @@ export default function CodeArena() {
         const logHistory = VidhiEngine.getLogHistory();
         const runId = VidhiEngine.getCurrentRunId();
 
-        // Fetch execution log for diagnostics
-        if (runId) {
-          console.log('[DEBUG] Failed run ID:', runId, '| Mode:', VidhiEngine.getMode());
-          const logBase = VidhiEngine.isCloudMode()
-            ? (import.meta.env.VITE_CLOUD_API_URL || '') + '/api'
-            : '/api';
-          fetch(`${logBase}/runs/${runId}/execution-log`)
-            .then(r => r.text())
-            .then(t => console.error('[EXECUTION LOG]:', t))
-            .catch(e => console.warn('[EXECUTION LOG fetch failed]:', e.message));
-        }
-
         // Read error message — prefer errorMessage, then error field, then last log line
         const lastLog = logHistory.length > 0 ? logHistory[logHistory.length - 1] : null;
         const errorMsg = lastState?.errorMessage
@@ -226,10 +214,57 @@ export default function CodeArena() {
           logHistory,
         });
 
-        alert('Simulation Error:\n\n' + errorMsg + '\n\nOpen DevTools (F12 → Console) to see the full error.');
-        hasNavigatedRef.current = false;
-        setShowModal(false);
-        startTimeRef.current = 0;
+        const handleAlertAndClose = (displayMsg) => {
+          alert('Simulation Error:\n\n' + displayMsg + '\n\nOpen DevTools (F12 → Console) to see the full error.');
+          hasNavigatedRef.current = false;
+          setShowModal(false);
+          startTimeRef.current = 0;
+        };
+
+        // Fetch execution log for diagnostics
+        if (runId) {
+          console.log('[DEBUG] Failed run ID:', runId, '| Mode:', VidhiEngine.getMode());
+          const logBase = VidhiEngine.isCloudMode()
+            ? (import.meta.env.VITE_CLOUD_API_URL || '') + '/api'
+            : '/api';
+          fetch(`${logBase}/runs/${runId}/execution-log`)
+            .then(r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.text();
+            })
+            .then(t => {
+              console.error('[EXECUTION LOG]:', t);
+              // Extract the most relevant error lines
+              const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+              let errorSnippet = '';
+              if (lines.length > 0) {
+                const interest = lines.filter(l => 
+                  l.toLowerCase().includes('error') || 
+                  l.toLowerCase().includes('failed') || 
+                  l.toLowerCase().includes('exception') || 
+                  l.toLowerCase().includes('mmap') ||
+                  l.toLowerCase().includes('exit') ||
+                  l.toLowerCase().includes('cannot') ||
+                  l.toLowerCase().includes('could not')
+                );
+                if (interest.length > 0) {
+                  errorSnippet = interest.slice(-5).join('\n');
+                } else {
+                  errorSnippet = lines.slice(-8).join('\n');
+                }
+              }
+              const finalMsg = errorSnippet 
+                ? `${errorMsg}\n\nExecution Log Snippet:\n${errorSnippet}`
+                : errorMsg;
+              handleAlertAndClose(finalMsg);
+            })
+            .catch(e => {
+              console.warn('[EXECUTION LOG fetch failed]:', e.message);
+              handleAlertAndClose(errorMsg);
+            });
+        } else {
+          handleAlertAndClose(errorMsg);
+        }
       }
 
       if (status === 'idle' || status === 'done') {

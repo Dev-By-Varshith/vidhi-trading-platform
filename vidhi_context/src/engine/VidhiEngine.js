@@ -152,10 +152,15 @@ class VidhiEngine {
       if (run.status === 'complete' || run.status === 'error' || run.status === 'tle') {
         this.isSimulating = false;
         this._pollStopped = true;  // tell polling loop to stop
+
+        const errorMessage = run.status === 'tle'
+          ? (this.mode === 'cloud' ? 'Cloud submission timed out during backend execution.' : 'Submission timed out during backend execution.')
+          : (this.mode === 'cloud' ? 'Cloud submission failed in the Forge pipeline or C++ Game Master execution.' : 'Submission failed in the Forge pipeline or local Game Master execution.');
+
         // Set lastState FIRST so onStatus subscribers read valid state
-        this.lastState = { ...this.lastState, ...mapped, done: true };
+        this.lastState = { ...this.lastState, ...mapped, errorMessage, done: true };
         this._setStatus(run.status === 'complete' ? 'done' : 'error');
-        this.completeSubscribers.forEach(cb => cb(mapped));
+        this.completeSubscribers.forEach(cb => cb(this.lastState));
 
         if (run.status === 'complete') {
           this._log(`[GM] Run complete — PnL=${mapped.pnlPct?.toFixed(4)}% p99=${mapped.p99?.toFixed(0)}ns correctness=${mapped.correctness?.toFixed(3)}`);

@@ -91,9 +91,13 @@ func resolveDatasetPath(stored string, ticks int64, preferFinal bool) string {
 	}
 
 	candidates = append(candidates,
+		filepath.Join(".", "datasets", filepath.Base(fileName)),
+		filepath.Join("/app", "datasets", filepath.Base(fileName)),
 		filepath.Join(".", "data", "ticks", defaultName),
 		filepath.Join("backend", "data", "ticks", defaultName),
 		filepath.Join("/app", "data", "ticks", defaultName),
+		filepath.Join(".", "datasets", defaultName),
+		filepath.Join("/app", "datasets", defaultName),
 		defaultName,
 	)
 
