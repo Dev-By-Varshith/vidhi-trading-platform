@@ -19,6 +19,7 @@ Thumbs.db
 *.csv
 *.bin
 *.arrow
+!backend/datasets/test_99k.bin
 
 # Binaries / Zips
 *.zip
